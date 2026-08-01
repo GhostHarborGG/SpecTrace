@@ -9,5 +9,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "ignore": "^6.0.2",
+    "typescript": "^5.6.3"
   }
 }

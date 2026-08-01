@@ -9,7 +9,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "cli": "tsx packages/cli/src/index.ts"
+    "cli": "tsx packages/cli/src/index.ts",
+    "prelim": "tsx packages/prelim/src/cli/index.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

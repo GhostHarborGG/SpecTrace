@@ -7,3 +7,7 @@ Methodology record for human–AI development on SpecTrace
 |---|---|---|---|
 | 2026-08-01 | Specs: SPEC-CLI-000, SPEC-APP-000, setup + build plans | Claude chat | pair-design; drafts reviewed & owned by BP |
 | 2026-08-01 | Phase A scaffold (workspaces, CI, CLAUDE.md, package stubs) | Claude chat | scaffold |
+| 2026-08-01 | Prelim harness (spec-trace-prelim repo: indexer, BM25F, metrics, CLI; built across prior sessions) | Claude Code | draft; reviewed by BP |
+| 2026-08-01 | Experiment repo freeze record (unjs/hookable v6.1.1; §5.2 record; tag→SHA verified) — selection by BP | Claude Code | scaffold |
+| 2026-08-01 | Port prelim harness into monorepo as packages/prelim + fixtures (todo-example, experiment/) | Claude Code | scaffold |
+| 2026-08-01 | REQ-CORE-010/011/020: promote indexer + BM25F retrieval into @spectrace/core with AC-mapped tests; prelim rewired to consume core | Claude Code | draft (promoted from reviewed spike code) |

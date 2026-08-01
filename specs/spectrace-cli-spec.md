@@ -75,7 +75,7 @@ SpecTrace establishes and maintains bidirectional trace links between Markdown s
 
 ---
 **REQ-CORE-010 — Symbol extraction**
-- **Priority:** P0 · **Status:** Proposed
+- **Priority:** P0 · **Status:** Implemented
 - **Rationale:** Proposal Step 3: symbol-level granularity via the TypeScript Compiler API.
 - **Requirement:** The indexer shall extract files, classes, methods, functions, and exported modules from TypeScript and JavaScript sources using the TypeScript Compiler API, recording for each: a stable symbol identifier, file path, signature, and any attached documentation comments.
 - **Acceptance criteria:**
@@ -101,7 +101,7 @@ SpecTrace establishes and maintains bidirectional trace links between Markdown s
 
 ---
 **REQ-CORE-020 — Lexical retrieval (Configuration A)**
-- **Priority:** P0 · **Status:** Proposed
+- **Priority:** P0 · **Status:** Implemented
 - **Rationale:** Proposal Step 3: the lexical baseline must be measurable without any model access.
 - **Requirement:** For each requirement, the engine shall rank symbols by BM25 over symbol names, signatures, documentation, comments, and normalized source text, returning the top-k candidates (k from configuration); this mode shall require no network access of any kind.
 - **Acceptance criteria:**

@@ -6,12 +6,39 @@
  * process.exit; all returns structuredClone-safe; POSIX paths in
  * all stored artifacts and symbol identifiers.
  *
- * Phase A status: types + stubs. Implementations land per phase:
+ * Status: implementations land per phase:
+ *   REQ-CORE-010/011 indexing and REQ-CORE-020 lexical retrieval are
+ *   implemented (promoted from the Phase A feasibility harness after
+ *   review). Remaining:
  *   Phase B: schema/validation/templates/config (REQ-CORE-001..004)
- *   Phase C: indexing + retrieval               (REQ-CORE-010..023)
+ *   Phase C: semantic/hybrid retrieval + index artifact (REQ-CORE-012, 021..023)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
  *   Phase F: drift                              (REQ-CORE-060..063)
  */
+
+// ---------- Indexing (REQ-CORE-010/011) ----------
+
+export type { CodeSymbol, SymbolKind } from "./indexer/types.js";
+export {
+  indexRepository,
+  DuplicateSymbolIdIndexError,
+  type IndexerConfig,
+  type IndexResult
+} from "./indexer/typescript-indexer.js";
+export { assignSymbolIds, hashSignature, type OverloadSignature } from "./indexer/symbol-id.js";
+export { ExclusionMatcher, type ExclusionConfig } from "./indexer/exclusions.js";
+
+// ---------- Lexical retrieval (REQ-CORE-020, Configuration A) ----------
+
+export {
+  retrieveCandidates,
+  type RetrievalQuery,
+  type RankedCandidate,
+  type CandidateSet,
+  type RetrieveOptions
+} from "./retrieval/retrieve.js";
+export { DEFAULT_BM25F_CONFIG, type BM25FConfig, type BM25FField } from "./retrieval/bm25.js";
+export { tokenize } from "./retrieval/tokenizer.js";
 
 // ---------- Shared types ----------
 
