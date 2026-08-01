@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Scratch output from manually running the spectrace-prelim CLI against this
+# project (e.g. `--out ..\todo-example\run-index.jsonl`). This repo is meant
+# to stay pristine example target data; harness output belongs under
+# spectrace-prelim/runs/ instead, but this catches it if it lands here anyway.
+run-*.jsonl
+*.spectrace-run/
+

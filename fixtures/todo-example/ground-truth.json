@@ -1,0 +1,175 @@
+{
+  "repositoryCommit": "acab86789c48f5439e34e2955c96139ae1010852",
+  "createdAt": "2026-07-27T00:00:00.000Z",
+  "labeler": "Claude (Sonnet 5), at Brian Parker's direction",
+  "links": [
+    {
+      "requirementId": "REQ-TODO-001",
+      "symbolId": "ts:src/todo-list.ts#TodoList.addTask:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "addTask is the only method that creates and stores a new task, matching the requirement's addTask reference directly."
+    },
+    {
+      "requirementId": "REQ-TODO-001",
+      "symbolId": "ts:src/task.ts#CreateTaskInput:interface",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "Defines the exact set of fields a caller may supply when adding a task (title required, everything else optional), which the requirement's acceptance criteria depend on."
+    },
+    {
+      "requirementId": "REQ-TODO-002",
+      "symbolId": "ts:src/todo-list.ts#TodoList.completeTask:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "completeTask is the only method that sets a task's completed flag to true and records a completion time."
+    },
+    {
+      "requirementId": "REQ-TODO-003",
+      "symbolId": "ts:src/todo-list.ts#TodoList.removeTask:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "removeTask is the only method that deletes a task from the active list and reports whether a task was actually removed."
+    },
+    {
+      "requirementId": "REQ-TODO-004",
+      "symbolId": "ts:src/todo-list.ts#TodoList.reopenTask:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "reopenTask is the only method that sets completed back to false and clears completedAt on a previously completed task."
+    },
+    {
+      "requirementId": "REQ-TODO-005",
+      "symbolId": "ts:src/todo-list.ts#TodoList.updateTask:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "updateTask is the only method that changes title, notes, priority, dueDate, or tags on an existing task, leaving id and createdAt untouched and leaving omitted fields unchanged."
+    },
+    {
+      "requirementId": "REQ-TODO-005",
+      "symbolId": "ts:src/task.ts#Task:interface",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "Defines which fields exist on a task, and therefore which fields are and aren't editable (e.g. id and createdAt are excluded from what updateTask can change)."
+    },
+    {
+      "requirementId": "REQ-TODO-005",
+      "symbolId": "ts:src/task.ts#CreateTaskInput:interface",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "uncertain",
+      "rationale": "The TaskUpdate alias used by updateTask is Partial<CreateTaskInput>, so this interface indirectly defines the shape of an update, but TaskUpdate itself is a `type` alias and is not separately indexed as its own symbol, so this link is an approximation rather than a direct match."
+    },
+    {
+      "requirementId": "REQ-TODO-006",
+      "symbolId": "ts:src/todo-list.ts#TodoList.listTasks:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "listTasks accepts a filter and, when given a completed value, returns only tasks matching that completion status."
+    },
+    {
+      "requirementId": "REQ-TODO-006",
+      "symbolId": "ts:src/todo-list.ts#TaskFilter:interface",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "Defines the completed/priority filter shape listTasks accepts."
+    },
+    {
+      "requirementId": "REQ-TODO-007",
+      "symbolId": "ts:src/todo-list.ts#TodoList.searchTasks:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "searchTasks lowercases the query and both fields before comparing, satisfying the case-insensitive title/notes lookup described by the requirement."
+    },
+    {
+      "requirementId": "REQ-TODO-008",
+      "symbolId": "ts:src/todo-list.ts#TodoList.getSummary:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "getSummary is the only method that computes total/completed/remaining counts over the list."
+    },
+    {
+      "requirementId": "REQ-TODO-008",
+      "symbolId": "ts:src/todo-list.ts#TodoListSummary:interface",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "Defines the exact fields the summary reports (total, completedCount, remainingCount, overdueCount)."
+    },
+    {
+      "requirementId": "REQ-TODO-009",
+      "symbolId": "ts:src/todo-list.ts#TodoList.planFocusOrder:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "planFocusOrder sorts open tasks by priority weight first and, for ties, by nearer due date first, matching the requirement's ordering rule exactly."
+    },
+    {
+      "requirementId": "REQ-TODO-010",
+      "symbolId": "ts:src/todo-list.ts#TodoList.listTasksByTag:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "listTasksByTag is the only method that retrieves tasks sharing a given tag. This is the domain-vocabulary tier's intended target: the requirement says 'label' where the code says 'tag', and the requirement was deliberately worded to avoid naming this method."
+    },
+    {
+      "requirementId": "REQ-TODO-011",
+      "symbolId": "ts:src/todo-list.ts#TodoList.sweepCompleted:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "sweepCompleted removes every completed task from the active map and pushes it into the archive, directly satisfying the first acceptance criterion (no finished item remains active)."
+    },
+    {
+      "requirementId": "REQ-TODO-011",
+      "symbolId": "ts:src/todo-list.ts#TodoList.listArchivedTasks:method",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "listArchivedTasks is what makes swept-out tasks retrievable afterward, directly satisfying the requirement's second acceptance criterion."
+    },
+    {
+      "requirementId": "REQ-TODO-012",
+      "symbolId": "ts:src/persistence.ts#saveTasksToFile:function",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "saveTasksToFile is the only function that writes the task list to durable storage."
+    },
+    {
+      "requirementId": "REQ-TODO-012",
+      "symbolId": "ts:src/persistence.ts#loadTasksFromFile:function",
+      "labelPass": "independent",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "loadTasksFromFile is the only function that reconstructs the task list from a previously saved file, completing the round trip the requirement describes."
+    },
+    {
+      "requirementId": "REQ-TODO-012",
+      "symbolId": "ts:src/persistence.ts#serializeTasks:function",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "The JSON encoding step saveTasksToFile relies on; materially necessary but not itself the disk I/O the requirement describes."
+    },
+    {
+      "requirementId": "REQ-TODO-012",
+      "symbolId": "ts:src/persistence.ts#deserializeTasks:function",
+      "labelPass": "independent",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "The JSON decoding step loadTasksFromFile relies on, including the array-shape validation that guards against a corrupt file."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# Frozen experiment repository (specs/spectrace-prelim-spec.md §5.2).
+# Do not update the repository during the baseline experiment; any later
+# change is a separate commit or scenario (§13).
+
+repository:
+  url: https://github.com/unjs/hookable
+  commit: b77477c027039362ee0ec4f39b8998c4f1b21707
+  tag: v6.1.1
+  branch: main
+  license: MIT
+  selected_at: 2026-08-01T00:00:00Z
+  selection_reason: >
+    Meets every §5.1 criterion. Primarily TypeScript: all implementation
+    code is TypeScript (5 source files, 504 lines). External: maintained by
+    the UnJS community, not authored by the researcher. MIT-licensed. The
+    README documents substantially more than twelve observable behaviors
+    (hook registration, one-shot hooks, sequential execution, custom
+    callers, bulk/nested hooks, unregistration, removal APIs, lifecycle
+    observers, deprecated-hook aliases, debugging, error propagation,
+    typed hooks, and the minimal HookableCore). Small enough for manual
+    symbol-level ground-truth labeling. Builds and tests pass at the
+    frozen commit; no private services required.
+
+# Tag → commit verified 2026-08-01 via:
+#   git ls-remote https://github.com/unjs/hookable.git 'refs/tags/v6.1.1^{}'
+# which returned b77477c027039362ee0ec4f39b8998c4f1b21707.
+
+environment:
+  operating_system: Windows 11 Pro (10.0.26200)
+  node_version: v22.14.0
+  package_manager: pnpm 10.14.0
+  install_command: pnpm install
+  build_command: pnpm build
+  test_command: pnpm test
+  results_at_frozen_commit: >
+    pnpm build and pnpm test:types passed. 41 functional tests passed.
+    Two bundle-size tests failed only due to a local filesystem-sandbox
+    restriction during the verification run, not a library defect; noted
+    here rather than omitted.

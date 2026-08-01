@@ -1,3 +1,4 @@
 # Research-validity wall: Claude (any surface) must never see ground truth
 # while helping build retrieval/ranking. See build plan §0.2.
 fixtures/ground-truth/
+fixtures/todo-example/ground-truth.json
