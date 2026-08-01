@@ -1,0 +1,6 @@
+# All text files use LF everywhere — protects byte-identical index rebuilds
+# (REQ-CORE-012 AC1) and the CLI JSON parity snapshots across Windows/macOS.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

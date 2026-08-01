@@ -1,0 +1,17 @@
+{
+  "name": "@spectrace/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "spectrace": "dist/index.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@spectrace/core": "workspace:*",
+    "commander": "^12.1.0"
+  }
+}
