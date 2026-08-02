@@ -65,6 +65,7 @@ Create these in the Phase A scaffold:
   - Feasibility harness: TS Compiler API indexer spike (proto-REQ-CORE-010), BM25 retrieval (proto-REQ-CORE-020), Recall@k computation, results table generator.
 - **Descoped (2026-08-02, BP):** the model-classification stage (proto-REQ-CORE-030 with usage accounting) moves to Phase D, and the controlled drift scenarios (prelim PQ5) to Phase F. Retrieval quality is the load-bearing half of the retrieval-first assumption; spike LLM code written against a still-moving retrieval contract invites exactly the calcification this phase warns against. The LLM portions of PQ3/PQ4 are measured in Phase D; the feasibility write-up records both deferrals in its limitations.
 - **Gate:** Recall@k (overall and by difficulty stratum) in hand; error analysis drafted by you; go/no-go on retrieval quality; proposal revised if the numbers demand it.
+- **Gate closed 2026-08-02 (BP): GO on retrieval quality.** Evidence: bm25f-v5 (overall R@5 .750, Hit@5 91.7%, Hit@10 100%, MRR .515), independently reproduced by BP with byte-identical artifacts; docs/feasibility-error-analysis.md drafted and revised. Carried into the report work, not the gate: the §14 per-miss classification (`errors.jsonl`, BP-only) and the deferred PQ3/PQ4/PQ5 items per the 2026-08-02 descope.
 - **Watch-for:** don't let harness code calcify — it's a spike; the real REQ-CORE implementations in Phases B–C start clean and inherit only what review says is worth keeping.
 
 ## Phase B — Schema Freeze & Dataset (+ Studio skeleton)
