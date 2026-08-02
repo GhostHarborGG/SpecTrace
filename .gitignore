@@ -13,3 +13,9 @@ Thumbs.db
 # Run artifacts (rebuildable per REQ-CORE-071; promote keepers to a results
 # package deliberately instead of committing working runs)
 runs/
+
+# Generated index (REQ-CORE-012: fully rebuildable from specs + repository, so
+# nothing may exist only here). Config and templates ARE committed — they are
+# shared per-repo settings, so CI validates against the same ones you do.
+.spectrace/index.json
+.spectrace/index.jsonl
