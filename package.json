@@ -13,6 +13,12 @@
     "spec:index": "node scripts/spec-index.mjs",
     "spec:index:check": "node scripts/spec-index.mjs --check"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^22.20.1",
     "yaml": "^2.9.0",

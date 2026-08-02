@@ -12,6 +12,11 @@ ask for one or propose a spec change first.
 ## Commands
 - `pnpm install` · `pnpm build` · `pnpm test` · `pnpm typecheck`
 - `pnpm cli <args>` runs the CLI from source (e.g. `pnpm cli --help`)
+- `pnpm --filter @spectrace/studio dev` runs Studio (Electron).
+  If it fails with `Error: Electron uninstall`, the runtime binary is
+  missing — pnpm records the postinstall as done, so neither `install`
+  nor `rebuild` will retry it. Force it:
+  `cd node_modules/.pnpm/electron@*/node_modules/electron && node install.js`
 - `pnpm spec:index` regenerates the requirement tables in the narrative
   `*-spec.md` documents from `specs/requirements/` frontmatter;
   `pnpm spec:index:check` is the CI guard. Never hand-edit a table between
