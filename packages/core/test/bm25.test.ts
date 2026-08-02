@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BM25FIndex, DEFAULT_BM25F_CONFIG, DEFAULT_STOPWORDS } from "../src/retrieval/bm25.js";
+import {
+  BM25F_V3_CONFIG,
+  BM25FIndex,
+  DEFAULT_BM25F_CONFIG,
+  DEFAULT_STOPWORDS,
+  foldPlural
+} from "../src/retrieval/bm25.js";
 import type { CodeSymbol } from "../src/indexer/types.js";
 
 function makeSymbol(overrides: Partial<CodeSymbol> & { symbolId: string }): CodeSymbol {
@@ -106,7 +112,7 @@ describe("BM25FIndex", () => {
 
   it("exposes the configuration it was built with", () => {
     const index = new BM25FIndex(corpus, DEFAULT_BM25F_CONFIG);
-    expect(index.config.configurationId).toBe("bm25f-v3");
+    expect(index.config.configurationId).toBe("bm25f-v4");
     expect(index.documentCount).toBe(corpus.length);
   });
 
@@ -222,5 +228,132 @@ describe("BM25FIndex", () => {
     );
     expect(functionRank).toBeGreaterThanOrEqual(0);
     expect(fileRank === -1 || functionRank < fileRank).toBe(true);
+  });
+});
+
+describe("foldPlural", () => {
+  it("folds the plurals revision 1 over-stripped or skipped (revision 2)", () => {
+    expect(foldPlural("promises", 2)).toBe("promise");
+    expect(foldPlural("fns", 2)).toBe("fn");
+  });
+
+  it("still folds genuine sibilant plurals (revision 2)", () => {
+    expect(foldPlural("classes", 2)).toBe("class");
+    expect(foldPlural("processes", 2)).toBe("process");
+    expect(foldPlural("responses", 2)).toBe("response");
+  });
+
+  it("leaves -ss/-us/-is endings and 2-char tokens alone (revision 2)", () => {
+    for (const term of ["class", "status", "this", "is", "as", "us"]) {
+      expect(foldPlural(term, 2), term).toBe(term);
+    }
+  });
+
+  it("reproduces the defects of revision 1", () => {
+    // Documented, not endorsed: "promises" split from "promise", and the
+    // length floor of 3 left "fns" unmatched against `fn`.
+    expect(foldPlural("promises", 1)).toBe("promis");
+    expect(foldPlural("fns", 1)).toBe("fns");
+  });
+
+  it("agrees between revisions on the terms neither defect touches", () => {
+    for (const term of ["classes", "hooks", "policies", "class", "status", "handler"]) {
+      expect(foldPlural(term, 1), term).toBe(foldPlural(term, 2));
+    }
+  });
+});
+
+const REMOVE_ALL_ITEMS = "ts:src/store.ts#removeAllItems:function";
+const REMOVE_ITEM = "ts:src/store.ts#removeItem:function";
+
+// Two siblings whose only lexical difference is the `all` morpheme, so any
+// ranking gap between them on a query containing "all" comes from stopword
+// handling and nothing else.
+const identifierCorpus: CodeSymbol[] = [
+  makeSymbol({
+    symbolId: REMOVE_ALL_ITEMS,
+    name: "removeAllItems",
+    qualifiedName: "removeAllItems",
+    relativePath: "src/store.ts"
+  }),
+  makeSymbol({
+    symbolId: REMOVE_ITEM,
+    name: "removeItem",
+    qualifiedName: "removeItem",
+    relativePath: "src/store.ts"
+  })
+];
+
+function scoreOf(results: readonly { symbolId: string; score: number }[], symbolId: string): number {
+  return results.find((candidate) => candidate.symbolId === symbolId)?.score ?? 0;
+}
+
+describe("BM25FIndex identifier-protected stopwords", () => {
+  it("ranks the symbol whose identifier carries the stopword above its sibling", () => {
+    const index = new BM25FIndex(identifierCorpus);
+    const results = index.search("removes all items", 10);
+    expect(results[0]!.symbolId).toBe(REMOVE_ALL_ITEMS);
+    expect(scoreOf(results, REMOVE_ALL_ITEMS)).toBeGreaterThan(scoreOf(results, REMOVE_ITEM));
+  });
+
+  it("does not distinguish the siblings by the stopword when protection is off", () => {
+    const index = new BM25FIndex(identifierCorpus, { ...DEFAULT_BM25F_CONFIG, protectIdentifierStopwords: false });
+    expect(index.search("removes all items", 10)).toEqual(index.search("removes items", 10));
+  });
+
+  it("derives protection from name/qualifiedName only, not from source or prose", () => {
+    const proseOnly: CodeSymbol[] = [
+      makeSymbol({
+        symbolId: "ts:src/buffer.ts#flushBuffer:function",
+        name: "flushBuffer",
+        qualifiedName: "flushBuffer",
+        relativePath: "src/buffer.ts",
+        documentation: "Drops all pending writes.",
+        normalizedSource: "flush buffer remove all buffered entries"
+      })
+    ];
+    const index = new BM25FIndex(proseOnly);
+    // "all" occurs only as prose, so it stays a stopword and carries nothing.
+    expect(index.search("all", 10)).toEqual([]);
+    expect(index.search("buffered", 10).length).toBe(1);
+  });
+});
+
+describe("BM25F_V3_CONFIG", () => {
+  it("identifies itself as the earlier revision", () => {
+    expect(BM25F_V3_CONFIG.configurationId).toBe("bm25f-v3");
+    expect(new BM25FIndex(corpus, BM25F_V3_CONFIG).config.configurationId).toBe("bm25f-v3");
+  });
+
+  it("reproduces v3 stopword semantics: identifier morphemes stay stopped", () => {
+    // v3 strips "all" from the query and from the identifier alike, leaving
+    // the siblings with identical term counts and field lengths: they tie
+    // exactly and fall back to symbolId order, where v4 separates them.
+    const index = new BM25FIndex(identifierCorpus, BM25F_V3_CONFIG);
+    const results = index.search("removes all items", 10);
+    expect(results).toEqual(index.search("removes items", 10));
+    expect(results.map((candidate) => candidate.symbolId)).toEqual([REMOVE_ALL_ITEMS, REMOVE_ITEM]);
+    expect(scoreOf(results, REMOVE_ALL_ITEMS)).toBe(scoreOf(results, REMOVE_ITEM));
+  });
+
+  it("reproduces the v3 plural folder", () => {
+    const promises: CodeSymbol[] = [
+      makeSymbol({
+        symbolId: "ts:src/async.ts#settlePromise:function",
+        name: "settlePromise",
+        qualifiedName: "settlePromise",
+        relativePath: "src/async.ts"
+      })
+    ];
+    // v3 folded the query to "promis" and the identifier to "promise".
+    expect(new BM25FIndex(promises, BM25F_V3_CONFIG).search("promises", 10)).toEqual([]);
+    expect(new BM25FIndex(promises).search("promises", 10).length).toBe(1);
+  });
+
+  it("is deterministic across repeated searches and separate indexes", () => {
+    const first = new BM25FIndex(identifierCorpus, BM25F_V3_CONFIG);
+    const second = new BM25FIndex(identifierCorpus, BM25F_V3_CONFIG);
+    expect(first.search("removes all items", 10)).toEqual(first.search("removes all items", 10));
+    expect(first.search("removes all items", 10)).toEqual(second.search("removes all items", 10));
   });
 });

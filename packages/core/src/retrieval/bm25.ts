@@ -49,20 +49,69 @@ export interface BM25FConfig {
    * beyond plurals mangle domain terms (§9.2).
    */
   foldPlurals: boolean;
+  /**
+   * Which `foldPlural` rule set to apply (only consulted when `foldPlurals`).
+   * Revision 1 is retained solely so an earlier `configurationId` reproduces
+   * its ranking bit-for-bit; revision 2 is the corrected rule set.
+   */
+  pluralFolderRevision: PluralFolderRevision;
+  /**
+   * Exempt stopwords that the corpus also uses as identifier morphemes from
+   * stopword filtering, in documents and queries alike. The function-word
+   * list is calibrated for prose, but identifiers carry those same words as
+   * domain terms (`removeAllHooks`, `beforeEach`, `callHookWith` lose
+   * `all`/`each`/`with`), and dropping them violates prelim §9.2's rule
+   * against discarding domain vocabulary. Derived from the corpus so no
+   * per-repository hand list is needed.
+   */
+  protectIdentifierStopwords: boolean;
 }
+
+export type PluralFolderRevision = 1 | 2;
 
 /**
  * Minimal plural folding (Harman "s-stemmer"): -ies → y, -es after a
  * sibilant → drop es, trailing -s otherwise → drop s. Never touches short
  * tokens or -ss/-us/-is endings, so "class", "status", "this" survive.
+ *
+ * Revision 1 is frozen as-shipped and must not be altered — it is what
+ * `bm25f-v3` scores with. Revision 2 corrects two defects in it: the
+ * sibilant class matched a bare `ses`, over-stripping 4-char stems so
+ * `promises` → `promis` split from `promise`, hence `sses`; and the length
+ * floor of 3 blocked short identifier plurals such as `fns` → `fn`, hence 2
+ * (the `ss|us|is` guard plus the stopword list still protect `is`/`as`/`us`).
  */
-function foldPlural(term: string): string {
-  if (term.length <= 3) return term;
+export function foldPlural(term: string, revision: PluralFolderRevision): string {
+  if (term.length <= (revision === 1 ? 3 : 2)) return term;
   if (term.endsWith("ies") && term.length > 4) return `${term.slice(0, -3)}y`;
   if (/(ss|us|is)$/.test(term)) return term;
-  if (/(ches|shes|xes|zes|ses)$/.test(term)) return term.slice(0, -2);
+  if (revision === 1 ? /(ches|shes|xes|zes|ses)$/.test(term) : /(ches|shes|xes|zes|sses)$/.test(term)) {
+    return term.slice(0, -2);
+  }
   if (term.endsWith("s")) return term.slice(0, -1);
   return term;
+}
+
+/**
+ * Stopwords minus the ones this corpus also uses as identifier morphemes
+ * (`config.protectIdentifierStopwords`). Only `name`/`qualifiedName` confer
+ * protection: a function word appearing in a source body or a doc comment is
+ * prose, which is exactly what the list exists to filter. Identifier tokens
+ * get the same tokenize + fold treatment as document text so the comparison
+ * happens in one term space; both the raw and the folded form are matched
+ * because `tokenizeFiltered` filters before it folds.
+ */
+function effectiveStopwords(symbols: readonly CodeSymbol[], config: BM25FConfig): ReadonlySet<string> {
+  const stopwords = new Set(config.stopwords);
+  if (!config.protectIdentifierStopwords || stopwords.size === 0) return stopwords;
+
+  for (const symbol of symbols) {
+    for (const term of tokenize(`${symbol.name} ${symbol.qualifiedName}`)) {
+      stopwords.delete(term);
+      if (config.foldPlurals) stopwords.delete(foldPlural(term, config.pluralFolderRevision));
+    }
+  }
+  return stopwords;
 }
 
 /**
@@ -82,18 +131,21 @@ export const DEFAULT_STOPWORDS: readonly string[] = [
 ];
 
 /**
- * Configuration A, revision 3. Field weights, k1, and b are unchanged from
+ * Configuration A, revision 4. Field weights, k1, and b are unchanged from
  * prelim spec §9.3's starting values. Relative to v1: v2 added
  * function-word stopwords, a 0.5 prior on file/module aggregate symbols
  * (rationale on the config fields above), and the length-normalization fix
  * that averages field length over documents where the field is non-empty —
  * previously ~95% empty documentation fields deflated the average so far
  * that documented symbols got no usable credit from the weight-2 field.
- * v3 adds plural folding. Each revision is a new `configurationId` per
- * §9.3; earlier results remain in their original run directories.
+ * v3 adds plural folding. v4 stops v2's stopword list from swallowing
+ * function words the corpus uses as identifier morphemes, and takes the
+ * corrected plural folder (rationales on `protectIdentifierStopwords` and
+ * `foldPlural`). Each revision is a new `configurationId` per §9.3; earlier
+ * results remain in their original run directories.
  */
 export const DEFAULT_BM25F_CONFIG: BM25FConfig = {
-  configurationId: "bm25f-v3",
+  configurationId: "bm25f-v4",
   k1: 1.2,
   b: 0.75,
   fieldWeights: {
@@ -111,8 +163,37 @@ export const DEFAULT_BM25F_CONFIG: BM25FConfig = {
     file: 0.5,
     module: 0.5
   } as Partial<Record<SymbolKind, number>>,
-  foldPlurals: true
+  foldPlurals: true,
+  pluralFolderRevision: 2,
+  protectIdentifierStopwords: true
 };
+
+/**
+ * Configuration A, revision 3, kept selectable for A/B runs against v4.
+ * Frozen: with this config `BM25FIndex` reproduces the v3 ranking
+ * bit-for-bit, so it must keep the pre-v4 field values (folder revision 1,
+ * no identifier protection) whatever the defaults become.
+ */
+export const BM25F_V3_CONFIG: BM25FConfig = Object.freeze({
+  configurationId: "bm25f-v3",
+  k1: 1.2,
+  b: 0.75,
+  fieldWeights: {
+    nameAndQualifiedName: 4,
+    signature: 3,
+    documentation: 2,
+    relativePath: 2,
+    normalizedSource: 1
+  },
+  stopwords: DEFAULT_STOPWORDS,
+  kindWeights: {
+    file: 0.5,
+    module: 0.5
+  } as Partial<Record<SymbolKind, number>>,
+  foldPlurals: true,
+  pluralFolderRevision: 1,
+  protectIdentifierStopwords: false
+});
 
 export interface RetrievedCandidate {
   symbolId: string;
@@ -158,7 +239,9 @@ export class BM25FIndex {
 
   constructor(symbols: readonly CodeSymbol[], config: BM25FConfig = DEFAULT_BM25F_CONFIG) {
     this.config = config;
-    this.stopwords = new Set(config.stopwords);
+    // Computed once, before any tokenization: documents and queries must be
+    // filtered against the same stopword set.
+    this.stopwords = effectiveStopwords(symbols, config);
 
     for (const symbol of symbols) {
       const fieldText = extractFieldText(symbol);
@@ -206,7 +289,7 @@ export class BM25FIndex {
       terms = terms.filter((term) => !this.stopwords.has(term));
     }
     if (this.config.foldPlurals) {
-      terms = terms.map(foldPlural);
+      terms = terms.map((term) => foldPlural(term, this.config.pluralFolderRevision));
     }
     return terms;
   }

@@ -37,7 +37,14 @@ export {
   type CandidateSet,
   type RetrieveOptions
 } from "./retrieval/retrieve.js";
-export { DEFAULT_BM25F_CONFIG, DEFAULT_STOPWORDS, type BM25FConfig, type BM25FField } from "./retrieval/bm25.js";
+export {
+  DEFAULT_BM25F_CONFIG,
+  BM25F_V3_CONFIG,
+  DEFAULT_STOPWORDS,
+  type BM25FConfig,
+  type BM25FField,
+  type PluralFolderRevision
+} from "./retrieval/bm25.js";
 export { tokenize } from "./retrieval/tokenizer.js";
 
 // ---------- Evaluation (REQ-CORE-070/071) ----------
