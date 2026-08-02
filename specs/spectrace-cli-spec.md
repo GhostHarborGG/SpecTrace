@@ -2,7 +2,7 @@
 id: SPEC-CLI-000
 title: SpecTrace CLI — Tool Specification
 status: Draft
-version: 0.1.0
+version: 0.2.0
 owner: Brian Parker
 created: 2026-08-01
 derived-from: "CPSC 597 Proposal — SpecTrace: AI-Powered Requirements Traceability for Markdown-Based Specifications (July 2026)"
@@ -240,7 +240,30 @@ SpecTrace establishes and maintains bidirectional trace links between Markdown s
 - **Acceptance criteria:**
   - AC1: Re-running under a different model snapshot yields a second result set and a machine-readable diff against the first.
 
-## 10. Command-line surface (REQ-CLI-001 … 008)
+## 10. Evaluation (REQ-CORE-070 … 071)
+
+The feasibility experiment's metric computation and run records were originally housed in the retired `@spectrace/prelim` harness (specs/spectrace-prelim-spec.md §10, §15). They are product capability now, so experiments measure the shipped engine. This section defines metric *computation*; evaluation methodology — datasets, labeling procedure, research questions — remains with the proposal and the prelim spec.
+
+---
+**REQ-CORE-070 — Retrieval evaluation metrics**
+- **Priority:** P0 · **Status:** Implemented
+- **Rationale:** Evaluation Plan / prelim spec §10: feasibility and capstone claims rest on Recall@k, Hit@k, and MRR against labeled ground truth; the engine computes them itself so measured code is shipped code.
+- **Requirement:** Given retrieval results, the requirement set they were produced for, and a ground-truth links file, the engine shall compute macro-averaged Recall@k, Hit@k (as a percentage), and mean reciprocal rank for configurable k values, reported overall and per requested slice (difficulty stratum, label-pass set per prelim spec §10.4); requirements with no in-scope ground-truth link shall be excluded from averages and enumerated in the report, not silently scored as zero.
+- **Acceptance criteria:**
+  - AC1: Default k set is {1, 3, 5, 10}; a requirement whose relevant symbols all fall outside the retained candidates contributes reciprocal rank 0 (prelim spec §10.3).
+  - AC2: Only `implements` links within the selected label passes count as relevant; `supports` links never do (prelim spec §7.3).
+  - AC3: The metrics report is deterministic at fixed inputs and survives `structuredClone`.
+
+---
+**REQ-CORE-071 — Run artifacts**
+- **Priority:** P0 · **Status:** Implemented
+- **Rationale:** Prelim spec §15: every reported number must be reproducible from recorded inputs; run records are the provenance trail the evaluation report cites.
+- **Requirement:** Retrieval results and evaluation reports shall be persistable as documented, versioned JSON/JSONL artifacts carrying provenance (repository commit, tool configuration, engine version), and the evaluation entry point shall accept a previously persisted results artifact as input.
+- **Acceptance criteria:**
+  - AC1: Identical inputs yield identical artifacts, excluding explicitly labeled timestamp fields.
+  - AC2: Retrieve → persist → evaluate round-trips: metrics computed from a persisted results artifact equal metrics computed from the same results in memory.
+
+## 11. Command-line surface (REQ-CLI-001 … 009)
 
 All commands: `--json` for machine-readable output on stdout (stable, versioned schemas shared with SPEC-APP-000); human-readable output otherwise; diagnostics on stderr; exit code 0 success, 1 operational failure, 2 usage error, 3 validation failure. This section is permanent CLI territory and will not move to the core spec.
 
@@ -261,12 +284,14 @@ All commands: `--json` for machine-readable output on stdout (stable, versioned 
 
 **REQ-CLI-008 — `spectrace drift <fromRef> <toRef>`** — Run drift analysis (REQ-CORE-060…063); `--full` disables incremental scoping; `--confirm <warningId>` / `--dismiss <warningId>` record dispositions; prints warnings grouped by category D1–D5.
 
+**REQ-CLI-009 — `spectrace evaluate`** — Compute evaluation metrics (REQ-CORE-070/071): `spectrace evaluate retrieval --results <file> --ground-truth <file> [--k <list>]` prints/emits the metrics report with its breakdowns; requires no network access; exit 1 on missing or malformed input files.
+
 - **Acceptance criteria (surface-wide):**
   - AC1: Every command's `--json` output validates against its published schema; schemas carry version fields.
   - AC2: `analyze --dry-run` performs zero model/embedding calls.
   - AC3: All commands run non-interactively in CI except `review` without `--decide`.
 
-## 11. Non-functional requirements
+## 12. Non-functional requirements
 
 **NFR-CORE-001 — Locality.** All state lives in the repository (`.spectrace/`, frontmatter) or rebuildable caches; the tool functions with no network access in Configuration A end-to-end (validate, index, retrieve, links, coverage, D1/D2/D5 drift). *(P0)*
 
@@ -280,25 +305,26 @@ All commands: `--json` for machine-readable output on stdout (stable, versioned 
 
 **NFR-CORE-005 — Privacy of transmitted content.** Only requirement text and candidate excerpts are transmitted (REQ-CORE-023); a `--show-payloads` flag reveals exactly what would be or was sent. *(P0)*
 
-## 12. Traceability to the proposal
+## 13. Traceability to the proposal
 
 | Proposal element | Spec section |
 |---|---|
 | Step 2 — schema, validation, templates | §3 (REQ-CORE-001…003) |
 | Step 3 — indexing, exclusions, retrieval, bounded candidates | §4–§5 (REQ-CORE-010…023) |
 | Step 4 — LLM ranking, malformed handling, human review | §6–§7 (REQ-CORE-030…042) |
-| Step 5 — dual storage, navigation, JSON/CI output | §8, §10 (REQ-CORE-050…052, REQ-CLI-006/007) |
+| Step 5 — dual storage, navigation, JSON/CI output | §8, §11 (REQ-CORE-050…052, REQ-CLI-006/007) |
 | Step 6 — git-aware drift, four categories + D5, warning content | §9 (REQ-CORE-060…063) |
 | Evaluation Plan — configurations A/B/C | §5 (REQ-CORE-020…022) |
 | Evaluation Plan — thresholds and override measurement | §7 (REQ-CORE-041) |
 | Evaluation Plan — provenance of every result | §9 (REQ-CORE-063) |
+| Evaluation Plan — retrieval metrics and run records | §10 (REQ-CORE-070/071), REQ-CLI-009 |
 | Resources — cost accounting | §6 (REQ-CORE-032), NFR-CORE-003 |
 | Scope — no code modification, TS/JS only, no runtime tracing | §1 |
 
-Evaluation methodology (datasets, metrics, drift injection procedure, RQ1–RQ4) is intentionally not restated here; the proposal and the eventual evaluation report are authoritative for it. This spec defines the tool those procedures measure.
+Evaluation methodology (datasets, labeling procedure, drift injection procedure, RQ1–RQ4) is intentionally not restated here; the proposal and the eventual evaluation report are authoritative for it. §10 defines metric computation as tool capability; this spec otherwise defines the tool those procedures measure.
 
-## 13. Document evolution
+## 14. Document evolution
 
-- On extraction of `@spectrace/core`, sections 3–9 and the NFR-CORE items move to `spectrace-core-spec.md` with IDs unchanged; this document retains §10 and NFR-CLI items and gains a dependency header pinning a core spec version.
+- On extraction of `@spectrace/core`, sections 3–10 and the NFR-CORE items move to `spectrace-core-spec.md` with IDs unchanged; this document retains §11 and NFR-CLI items and gains a dependency header pinning a core spec version.
 - SPEC-APP-000 Appendix A should re-point its matrix rows from proposal steps to REQ-CORE IDs once this document is baselined.
 - Threshold defaults, performance targets, and the recommended default configuration are updated in place when the capstone evaluation reports tuned values, with version bumps.

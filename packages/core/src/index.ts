@@ -7,9 +7,9 @@
  * all stored artifacts and symbol identifiers.
  *
  * Status: implementations land per phase:
- *   REQ-CORE-010/011 indexing and REQ-CORE-020 lexical retrieval are
- *   implemented (promoted from the Phase A feasibility harness after
- *   review). Remaining:
+ *   REQ-CORE-010/011 indexing, REQ-CORE-020 lexical retrieval, and
+ *   REQ-CORE-070/071 evaluation are implemented (promoted from the Phase A
+ *   feasibility harness after review). Remaining:
  *   Phase B: schema/validation/templates/config (REQ-CORE-001..004)
  *   Phase C: semantic/hybrid retrieval + index artifact (REQ-CORE-012, 021..023)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
@@ -40,7 +40,40 @@ export {
 export { DEFAULT_BM25F_CONFIG, DEFAULT_STOPWORDS, type BM25FConfig, type BM25FField } from "./retrieval/bm25.js";
 export { tokenize } from "./retrieval/tokenizer.js";
 
+// ---------- Evaluation (REQ-CORE-070/071) ----------
+
+export type {
+  LabelPass,
+  LinkRelationship,
+  LinkConfidence,
+  GroundTruthLink,
+  GroundTruthFile
+} from "./evaluation/ground-truth.js";
+export { ALLOWED_LABEL_PASSES } from "./evaluation/ground-truth.js";
+export {
+  evaluateRetrieval,
+  DEFAULT_METRIC_KS,
+  type EvaluationRequirement,
+  type ScoredResult,
+  type RetrievalMetricsBreakdown,
+  type RetrievalMetricsReport
+} from "./evaluation/retrieval-metrics.js";
+export {
+  serializeRetrievalResults,
+  parseRetrievalResults,
+  serializeMetricsReport,
+  ArtifactFormatError,
+  RETRIEVAL_RESULTS_ARTIFACT,
+  RETRIEVAL_METRICS_ARTIFACT,
+  ARTIFACT_VERSION,
+  type RunProvenance,
+  type MetricsArtifact
+} from "./evaluation/results-artifact.js";
+
 // ---------- Shared types ----------
+
+/** Engine version recorded in run-artifact provenance (REQ-CORE-071); keep in lockstep with package.json. */
+export const CORE_VERSION = "0.1.0";
 
 /** Opaque, stable requirement identifier (REQ-CORE-001 AC3). */
 export type RequirementId = string;
