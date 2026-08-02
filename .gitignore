@@ -9,3 +9,7 @@ Thumbs.db
 
 # IDE
 .idea/
+
+# Run artifacts (rebuildable per REQ-CORE-071; promote keepers to a results
+# package deliberately instead of committing working runs)
+runs/
