@@ -2,7 +2,7 @@
 id: REQ-CORE-001
 title: Schema fields
 spec: SPEC-CORE-000
-status: proposed
+status: implemented
 priority: P0
 links: []
 acceptance_criteria:

@@ -2,7 +2,7 @@
 id: REQ-CORE-002
 title: Validation rules
 spec: SPEC-CORE-000
-status: proposed
+status: implemented
 priority: P0
 links: []
 acceptance_criteria:

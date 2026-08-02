@@ -12,12 +12,39 @@
  *   REQ-CORE-070/071 evaluation are implemented (promoted from the Phase A
  *   feasibility harness after review). REQ-CORE-011 exclusions is partial:
  *   pattern matching holds, stale-proposal flagging waits on Phase D.
+ *   REQ-CORE-001/002 schema and validation are implemented.
  *   Remaining:
- *   Phase B: schema/validation/templates/config (REQ-CORE-001..004)
+ *   Phase B: templates + config (REQ-CORE-003/004)
  *   Phase C: semantic/hybrid retrieval + index artifact (REQ-CORE-012, 021..023)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
  *   Phase F: drift                              (REQ-CORE-060..063)
  */
+
+// ---------- Requirement schema and validation (REQ-CORE-001/002) ----------
+
+export type {
+  Requirement,
+  RequirementId,
+  RequirementStatus,
+  RequirementPriority,
+  TraceLinkRecord,
+  SchemaViolation,
+  SchemaViolationRule,
+  SchemaWarning,
+  SchemaWarningRule
+} from "./schema/types.js";
+export {
+  REQUIREMENT_STATUSES,
+  REQUIREMENT_PRIORITIES,
+  DEFAULT_REQUIREMENT_PRIORITY
+} from "./schema/types.js";
+export {
+  parseRequirementDocument,
+  type RequirementDocument,
+  type ParsedRequirement
+} from "./schema/parse.js";
+export { validateRequirements, type ValidationReport } from "./schema/validate.js";
+export { readRequirementDocuments, type LoadOptions } from "./schema/load.js";
 
 // ---------- Indexing (REQ-CORE-010/011) ----------
 
@@ -86,38 +113,8 @@ export {
 /** Engine version recorded in run-artifact provenance (REQ-CORE-071); keep in lockstep with package.json. */
 export const CORE_VERSION = "0.1.0";
 
-/** Opaque, stable requirement identifier (REQ-CORE-001 AC3). */
-export type RequirementId = string;
 /** Opaque, stable symbol identifier; POSIX paths only (REQ-CORE-010 AC1/AC2). */
 export type SymbolId = string;
-
-export type RequirementStatus = "Proposed" | "Implemented" | "Verified" | "Deprecated";
-
-export interface TraceLinkRecord {
-  symbol: SymbolId;
-  reviewer: string;
-  timestamp: string; // ISO 8601
-  commit: string;    // SHA the decision was made at
-}
-
-export interface Requirement {
-  id: RequirementId;
-  title: string;
-  rationale: string;
-  status: RequirementStatus;
-  priority: "P0" | "P1" | "P2";
-  acceptanceCriteria: string[]; // >= 1 enforced by validation (REQ-CORE-001)
-  traceLinks: TraceLinkRecord[];
-  /** Vault-relative POSIX path of the source document. */
-  path: string;
-}
-
-export interface SchemaViolation {
-  path: string;
-  requirementId?: RequirementId;
-  rule: "missing-field" | "duplicate-id" | "no-acceptance-criteria";
-  message: string;
-}
 
 /** Provenance attached to every generated result (REQ-CORE-063). */
 export interface Provenance {
@@ -135,21 +132,6 @@ export interface ConfidenceBands {
   suggest: number;  // default 0.75 (REQ-CORE-041)
   review: number;   // default 0.50
 }
-
-// ---------- Stage interfaces (stubs; implemented per phase) ----------
-
-export interface VaultApi {
-  loadRequirements(vaultDir: string): Promise<Requirement[]>;
-  validate(requirements: Requirement[]): SchemaViolation[];
-}
-
-const notYet = (req: string) => new Error(`Not implemented yet — lands with ${req}`);
-
-/** Phase B — REQ-CORE-001..002. */
-export const vault: VaultApi = {
-  async loadRequirements() { throw notYet("REQ-CORE-001 (Phase B)"); },
-  validate() { throw notYet("REQ-CORE-002 (Phase B)"); },
-};
 
 /** Default bands per REQ-CORE-041; tuned values replace these post-evaluation. */
 export const DEFAULT_CONFIDENCE_BANDS: ConfidenceBands = { suggest: 0.75, review: 0.5 };

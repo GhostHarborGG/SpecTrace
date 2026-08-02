@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIDENCE_BANDS, toPosixPath, vault } from "../src/index.js";
+import { DEFAULT_CONFIDENCE_BANDS, toPosixPath } from "../src/index.js";
 
 describe("core scaffold", () => {
   it("defaults match REQ-CORE-041 provisional policy", () => {
@@ -12,9 +12,5 @@ describe("core scaffold", () => {
 
   it("bands survive structuredClone (CLAUDE.md rule 3)", () => {
     expect(structuredClone(DEFAULT_CONFIDENCE_BANDS)).toEqual(DEFAULT_CONFIDENCE_BANDS);
-  });
-
-  it("unimplemented stages fail loudly with their REQ ID", async () => {
-    await expect(vault.loadRequirements("specs")).rejects.toThrow(/REQ-CORE-001/);
   });
 });
