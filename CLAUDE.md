@@ -11,8 +11,13 @@ REQ ID, ask for one or propose a spec change first.
 - `pnpm cli <args>` runs the CLI from source (e.g. `pnpm cli --help`)
 
 ## Hard rules
-1. **NEVER read, open, or reference anything under `fixtures/ground-truth/`.**
-   This is an experimental-blinding wall (build plan §0.2), not housekeeping.
+1. **NEVER read or open anything under `fixtures/ground-truth/`.**
+   Passing a ground-truth file path as a CLI argument (e.g. to
+   `spectrace evaluate`) is allowed; consuming label contents is not —
+   neither directly nor via per-requirement/per-link evaluation output.
+   Only aggregate metrics (overall and per-stratum Recall/Hit/MRR) may
+   be read back. Amended 2026-08-02 by BP; this is an
+   experimental-blinding wall (build plan §0.2), not housekeeping.
 2. `packages/core` has no `console.log`, reads no environment variables,
    and calls `process.exit` nowhere. Config is passed in explicitly.
    Progress goes through injected callbacks.
