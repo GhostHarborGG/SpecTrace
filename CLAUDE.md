@@ -1,9 +1,12 @@
 # SpecTrace — Claude Code Instructions
 
 Requirements traceability for Markdown specs ↔ TypeScript code.
-**`specs/` is authoritative.** Every task maps to a requirement ID
-(REQ-CORE-xxx / REQ-CLI-xxx in specs/spectrace-cli-spec.md;
-REQ-APP-xxx in specs/spectrace-product-spec.md). If a task has no
+**`specs/` is authoritative.** Every task maps to a requirement ID.
+Requirement bodies live one-per-file in `specs/requirements/`
+(REQ-CORE-xxx, REQ-CLI-xxx); the narrative documents that index them
+are specs/spectrace-core-spec.md (the engine) and
+specs/spectrace-cli-spec.md (the command surface). REQ-APP-xxx are
+still inline in specs/spectrace-product-spec.md. If a task has no
 REQ ID, ask for one or propose a spec change first.
 
 ## Commands
@@ -40,7 +43,8 @@ REQ ID, ask for one or propose a spec change first.
   ranking, links, drift). Owns all contracts.
 - `packages/cli` — @spectrace/cli: thin command surface over core.
 - `apps/studio` — Electron app (added later; consumes core, never bypasses it).
-- `specs/` — the spec vault (also the dogfood target).
+- `specs/` — the spec vault (also the dogfood target). `specs/requirements/`
+  holds one file per requirement; the `*-spec.md` documents are narrative.
 - `fixtures/` — evaluation repositories. ground-truth/ is off-limits (rule 1).
   todo-example/ is harness example data (its ground-truth.json is also
   off-limits); experiment/ holds the frozen feasibility-experiment inputs.

@@ -1,15 +1,18 @@
 /**
  * @spectrace/core — public API surface.
  *
- * Contract source: specs/spectrace-cli-spec.md (REQ-CORE-xxx).
+ * Contract source: specs/spectrace-core-spec.md (SPEC-CORE-000), with
+ * requirement bodies in specs/requirements/REQ-CORE-*.md.
  * Design rules (CLAUDE.md): no console output, no env reads, no
  * process.exit; all returns structuredClone-safe; POSIX paths in
  * all stored artifacts and symbol identifiers.
  *
  * Status: implementations land per phase:
- *   REQ-CORE-010/011 indexing, REQ-CORE-020 lexical retrieval, and
+ *   REQ-CORE-010 indexing, REQ-CORE-020 lexical retrieval, and
  *   REQ-CORE-070/071 evaluation are implemented (promoted from the Phase A
- *   feasibility harness after review). Remaining:
+ *   feasibility harness after review). REQ-CORE-011 exclusions is partial:
+ *   pattern matching holds, stale-proposal flagging waits on Phase D.
+ *   Remaining:
  *   Phase B: schema/validation/templates/config (REQ-CORE-001..004)
  *   Phase C: semantic/hybrid retrieval + index artifact (REQ-CORE-012, 021..023)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)

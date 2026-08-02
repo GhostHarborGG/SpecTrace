@@ -1,6 +1,6 @@
 # SpecTrace — End-to-End Build Plan (Working with Claude)
 
-**Companion to:** `spectrace-cli-spec.md` (SPEC-CLI-000) · `spectrace-product-spec.md` (SPEC-APP-000) · `spectrace-setup-integration-plan.md`
+**Companion to:** `spectrace-core-spec.md` (SPEC-CORE-000) · `spectrace-cli-spec.md` (SPEC-CLI-000) · `spectrace-product-spec.md` (SPEC-APP-000) · `spectrace-setup-integration-plan.md`
 **Structure:** phases, gated by exit criteria — not calendar dates. Each phase maps to a milestone row in the CPSC 597 proposal's schedule table, so advisor reporting stays aligned, but a phase ends when its gate is green, not when a month ends. Studio work trails core by one phase throughout, then continues past the capstone into R1.1/R2.
 **Principle:** the specs drive everything. Claude's job at every step is to work *from* the requirement IDs; your job is to own decisions, review output, and keep the specs authoritative. In a program that treats AI coding as a given, the graded skills are exactly the ones this plan hardens: planning, collaboration, and maintaining software over time.
 
@@ -47,7 +47,7 @@ Create these in the Phase A scaffold:
 ### 0.5 The standing loop (repeat for every requirement)
 
 1. **Spec check (chat, 5 min):** confirm the REQ's acceptance criteria still reflect intent; amend spec first if not.
-2. **Delegate (Claude Code):** "Implement REQ-CORE-020 per specs/spectrace-cli-spec.md §5. Write vitest tests for AC1–AC2 first, then implement until green. Don't modify snapshots."
+2. **Delegate (Claude Code):** "Implement REQ-CORE-020 per specs/requirements/REQ-CORE-020.md. Write vitest tests for each acceptance criterion first, then implement until green. Don't modify snapshots."
 3. **Review (you):** read the diff like a PR — especially anything touching storage formats, provenance, or thresholds (these are cross-document contracts).
 4. **Record:** merge, flip spec status, log the collaboration.
 5. **Per phase (chat):** review the phase gate, plan the next REQ batch, update risks.
@@ -120,7 +120,7 @@ Create these in the Phase A scaffold:
 **Proposal milestone:** drift confusion matrix reported; incremental against full analysis compared.
 
 - **You:** inject the D1–D5 scenarios as isolated commits (per protocol); score detections; run incremental-vs-full comparisons. This also discharges the controlled-drift feasibility scenarios (prelim PQ5) deferred from Phase A.
-- **Chat:** analyze confusion-matrix errors; decide any threshold retuning (tuned values become new defaults per §13 of the CLI spec).
+- **Chat:** analyze confusion-matrix errors; decide any threshold retuning (tuned values become new defaults per §13 of the core spec).
 - **Claude Code:**
   - REQ-CORE-060…063 (incremental scoping, categories, warning content, provenance) + REQ-CLI-008 (`drift`).
   - Studio: drift inbox, inline banners, tree badges (REQ-APP-021); settings surfaces (REQ-APP-040…042); failures panel (REQ-APP-044); rebuild actions (REQ-APP-045); status report generation (REQ-APP-022, REQ-APP-043).
