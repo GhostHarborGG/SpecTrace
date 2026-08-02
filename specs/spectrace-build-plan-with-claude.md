@@ -63,8 +63,8 @@ Create these in the Phase A scaffold:
 - **Claude Code:**
   - Setup-plan Phases 0–1: monorepo scaffold, workspace config, CI (`pnpm test` GitHub Action), CLAUDE.md.
   - Feasibility harness: TS Compiler API indexer spike (proto-REQ-CORE-010), BM25 retrieval (proto-REQ-CORE-020), Recall@k computation, results table generator.
-  - Model-classification stage for the top-5 candidates (proto-REQ-CORE-030) with usage accounting.
-- **Gate:** feasibility numbers in hand; error analysis drafted by you; go/no-go on the retrieval-first assumption; proposal revised if the numbers demand it.
+- **Descoped (2026-08-02, BP):** the model-classification stage (proto-REQ-CORE-030 with usage accounting) moves to Phase D, and the controlled drift scenarios (prelim PQ5) to Phase F. Retrieval quality is the load-bearing half of the retrieval-first assumption; spike LLM code written against a still-moving retrieval contract invites exactly the calcification this phase warns against. The LLM portions of PQ3/PQ4 are measured in Phase D; the feasibility write-up records both deferrals in its limitations.
+- **Gate:** Recall@k (overall and by difficulty stratum) in hand; error analysis drafted by you; go/no-go on retrieval quality; proposal revised if the numbers demand it.
 - **Watch-for:** don't let harness code calcify — it's a spike; the real REQ-CORE implementations in Phases B–C start clean and inherit only what review says is worth keeping.
 
 ## Phase B — Schema Freeze & Dataset (+ Studio skeleton)
@@ -97,7 +97,7 @@ Create these in the Phase A scaffold:
 - **You:** review every proposal in the controlled run yourself (this doubles as override-rate data); tune prompt wording — prompt versions bump per REQ-CORE-030.
 - **Chat:** prompt engineering iterations; malformed-response taxonomy; threshold behavior review (REQ-CORE-041).
 - **Claude Code:**
-  - REQ-CORE-030…032 (ranking, malformed handling, usage accounting), REQ-CORE-040…042 (review, bands, audit), REQ-CORE-050…052 (dual storage, queries, stale links), REQ-CLI-004…007 (`analyze`, `review`, `links`, `coverage`).
+  - REQ-CORE-030…032 (ranking, malformed handling, usage accounting), REQ-CORE-040…042 (review, bands, audit), REQ-CORE-050…052 (dual storage, queries, stale links), REQ-CLI-004…007 (`analyze`, `review`, `links`, `coverage`). The ranking work also discharges the feasibility measurements deferred from Phase A (prelim PQ3, and PQ4's token/latency/cost portion): run classification accuracy and cost on the frozen experiment repository.
   - CLI JSON snapshots recorded — these become Studio's parity suite (NFR-APP-007) permanently.
   - Studio: GitHub sync + SHA-keyed cache (REQ-APP-010/011), `runAnalysis` IPC with progress/cost streaming (REQ-APP-012), parity harness green.
 - **Gate:** configuration C precision/recall reported; `spectrace analyze && spectrace review` full loop works; Studio runs the same analysis with identical output.
@@ -117,7 +117,7 @@ Create these in the Phase A scaffold:
 
 **Proposal milestone:** drift confusion matrix reported; incremental against full analysis compared.
 
-- **You:** inject the D1–D5 scenarios as isolated commits (per protocol); score detections; run incremental-vs-full comparisons.
+- **You:** inject the D1–D5 scenarios as isolated commits (per protocol); score detections; run incremental-vs-full comparisons. This also discharges the controlled-drift feasibility scenarios (prelim PQ5) deferred from Phase A.
 - **Chat:** analyze confusion-matrix errors; decide any threshold retuning (tuned values become new defaults per §13 of the CLI spec).
 - **Claude Code:**
   - REQ-CORE-060…063 (incremental scoping, categories, warning content, provenance) + REQ-CLI-008 (`drift`).

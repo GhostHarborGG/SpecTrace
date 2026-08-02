@@ -1,6 +1,7 @@
 # SpecTrace Preliminary Work Specification and Runbook
 
-**Status:** Draft for implementation  
+**Status:** Draft for implementation — amended, see below  
+**Amended:** 2026-08-02 (decision by BP) — LLM ranking (PQ3, and PQ4's token/latency/cost portion) is deferred to main-project Phase D (REQ-CORE-030…032); controlled drift (PQ5) is deferred to Phase F (REQ-CORE-060…063). Affected items below are tagged **[deferred]**; deferred sections are retained as the design record for those phases. The findings report records the deferrals in its limitations.  
 **Project:** SpecTrace  
 **Owner:** Brian Parker  
 **Target:** CPSC 597 / 598 preliminary feasibility work  
@@ -33,13 +34,15 @@ The preliminary work is complete when:
 5. BM25F retrieval produces a ranked top-10 candidate list for every requirement.
 6. Ground-truth links are established using the required two-pass labeling process.
 7. Recall@1, Recall@3, Recall@5, Recall@10, Hit@k, and mean reciprocal rank are reported.
-8. The top five candidates per requirement can be sent to a configured LLM for structured classification.
-9. LLM responses, tokens, latency, model identity, prompt version, and estimated cost are recorded.
-10. Four controlled drift scenarios are stored as isolated commits and evaluated.
+8. The top five candidates per requirement can be sent to a configured LLM for structured classification. **[deferred — Phase D]**
+9. LLM responses, tokens, latency, model identity, prompt version, and estimated cost are recorded. **[deferred — Phase D]**
+10. Four controlled drift scenarios are stored as isolated commits and evaluated. **[deferred — Phase F]**
 11. Every missed link is assigned an error category.
 12. A reproducible results package and preliminary findings report are generated.
 
 Measurements do not need to be favorable. A weak retrieval result with a clear error analysis satisfies the experiment better than a favorable but irreproducible result.
+
+Per the 2026-08-02 amendment, the preliminary work closes on items 1–7 and 11–12; items 8–10 are deferred as tagged, and the findings report records the deferrals in its limitations.
 
 ## 3. Scope
 
@@ -51,10 +54,10 @@ Measurements do not need to be favorable. A weak retrieval result with a clear e
 - File, class, method, function, and exported-module symbols
 - Markdown requirements with stable identifiers
 - Local field-weighted BM25 (BM25F) retrieval
-- Structured LLM ranking of a maximum of five candidates per requirement
+- Structured LLM ranking of a maximum of five candidates per requirement **[deferred — Phase D]**
 - Human-reviewed ground truth
 - Git-based experiment versioning
-- Four controlled drift scenarios
+- Four controlled drift scenarios **[deferred — Phase F]**
 - Machine-readable results
 
 ### 3.2 Optional during preliminary work
@@ -88,7 +91,7 @@ How often does lexical retrieval place a correct source symbol in the top 1, 3, 
 
 How does retrieval quality change as lexical overlap between a requirement and its implementation decreases?
 
-### PQ3. LLM ranking
+### PQ3. LLM ranking **[deferred — Phase D]**
 
 When a correct symbol is present in the top five candidates, can an LLM rank or classify it accurately?
 
@@ -96,7 +99,9 @@ When a correct symbol is present in the top five candidates, can an LLM rank or 
 
 What runtime, token usage, latency, and estimated API cost are required per requirement?
 
-### PQ5. Controlled drift
+Runtime of the local pipeline (indexing, retrieval, metrics) is answered in the preliminary work; the token, latency, and API-cost portion is **[deferred — Phase D]** with the ranking stage.
+
+### PQ5. Controlled drift **[deferred — Phase F]**
 
 Can the harness identify renamed symbols, deleted symbols, changed requirements, and contradictory code changes?
 
@@ -468,7 +473,7 @@ Report all retrieval metrics:
 - Independent ground truth only
 - Independent plus candidate-review ground truth
 
-## 11. LLM Ranking Stage
+## 11. LLM Ranking Stage **[deferred — Phase D]**
 
 ### 11.1 Input boundary
 
@@ -584,7 +589,7 @@ Allowed decisions:
 
 Retain rejected and redirected proposals for analysis.
 
-## 13. Controlled Drift Scenarios
+## 13. Controlled Drift Scenarios **[deferred — Phase F]**
 
 Apply every scenario as an isolated commit derived from the same frozen baseline. Do not stack the scenarios.
 
@@ -837,6 +842,8 @@ The generated report should contain:
 
 Do not remove failed requirements, missed links, malformed responses, or unfavorable runs from the report.
 
+Per the 2026-08-02 amendment, items 12–14 (LLM ranking results; token usage, latency, and cost; drift-scenario results) are deferred; the report instead records the deferrals and their validity implications under items 15–16.
+
 ## 20. Implementation Sequence
 
 ### Phase 1: Freeze inputs
@@ -873,14 +880,14 @@ Do not remove failed requirements, missed links, malformed responses, or unfavor
 - Break results down by difficulty group.
 - Classify every miss.
 
-### Phase 6: Add LLM ranking
+### Phase 6: Add LLM ranking **[deferred — Phase D]**
 
 - Create a versioned prompt.
 - Submit only the top five candidates.
 - Validate structured responses.
 - Record usage and cost.
 
-### Phase 7: Execute drift scenarios
+### Phase 7: Execute drift scenarios **[deferred — Phase F]**
 
 - Create four isolated commits.
 - Record expected results before running detection.
@@ -917,10 +924,10 @@ Use this checklist before writing the first implementation code:
 - [ ] Complete candidate-assisted pass two.
 - [ ] Calculate retrieval metrics.
 - [ ] Perform error analysis.
-- [ ] Add top-five LLM ranking.
-- [ ] Record tokens, latency, and cost.
-- [ ] Create the four isolated drift commits.
-- [ ] Run and score the scenarios.
+- [ ] Add top-five LLM ranking. **[deferred — Phase D]**
+- [ ] Record tokens, latency, and cost. **[deferred — Phase D]**
+- [ ] Create the four isolated drift commits. **[deferred — Phase F]**
+- [ ] Run and score the scenarios. **[deferred — Phase F]**
 - [ ] Generate the preliminary report.
 
 ## 22. Preliminary Work Acceptance Checklist
@@ -934,11 +941,11 @@ The preliminary work is ready to present when:
 - [ ] Ground truth contains separate pass-one and pass-two labels.
 - [ ] Retrieval metrics are reported overall and by difficulty.
 - [ ] Every miss has an error category.
-- [ ] Top-five LLM calls use structured responses.
-- [ ] Every model call has usage and cost records.
-- [ ] The full repository was never included in an LLM request.
-- [ ] All four required drift scenarios were applied as isolated commits.
-- [ ] Actual drift results are compared with expected results.
+- [ ] Top-five LLM calls use structured responses. **[deferred — Phase D]**
+- [ ] Every model call has usage and cost records. **[deferred — Phase D]**
+- [ ] The full repository was never included in an LLM request. **[deferred — Phase D]**
+- [ ] All four required drift scenarios were applied as isolated commits. **[deferred — Phase F]**
+- [ ] Actual drift results are compared with expected results. **[deferred — Phase F]**
 - [ ] Limitations and threats to validity are documented.
 - [ ] Unfavorable and failed runs remain in the results package.
 
