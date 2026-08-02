@@ -46,6 +46,17 @@ export {
 export { validateRequirements, type ValidationReport } from "./schema/validate.js";
 export { readRequirementDocuments, type LoadOptions } from "./schema/load.js";
 
+// ---------- Specification templates (REQ-CORE-003) ----------
+
+export type { TemplateKind, TemplateDefinition } from "./templates/types.js";
+export { TEMPLATE_KINDS, TEMPLATES } from "./templates/types.js";
+export {
+  instantiateTemplate,
+  instantiateAllTemplates,
+  nextRequirementId,
+  type InstantiateOptions
+} from "./templates/instantiate.js";
+
 // ---------- Configuration (REQ-CORE-004) ----------
 
 export type {

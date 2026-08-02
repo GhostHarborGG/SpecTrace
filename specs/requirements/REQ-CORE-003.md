@@ -2,7 +2,7 @@
 id: REQ-CORE-003
 title: Specification templates
 spec: SPEC-CORE-000
-status: proposed
+status: implemented
 priority: P1
 links: []
 acceptance_criteria:
