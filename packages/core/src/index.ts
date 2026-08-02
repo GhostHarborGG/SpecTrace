@@ -46,6 +46,28 @@ export {
 export { validateRequirements, type ValidationReport } from "./schema/validate.js";
 export { readRequirementDocuments, type LoadOptions } from "./schema/load.js";
 
+// ---------- Configuration (REQ-CORE-004) ----------
+
+export type {
+  SpectraceConfig,
+  RetrievalConfig,
+  ModelConfig,
+  ConfidenceBands,
+  RetrievalMode,
+  ConfigWarning,
+  ConfigWarningRule,
+  ConfigLoadResult
+} from "./config/types.js";
+export {
+  DEFAULT_CONFIG,
+  DEFAULT_CONFIDENCE_BANDS,
+  CONFIG_FILE_RELATIVE_PATH,
+  CONFIG_VERSION,
+  RETRIEVAL_MODES
+} from "./config/types.js";
+export { parseConfig } from "./config/parse.js";
+export { loadConfig } from "./config/load.js";
+
 // ---------- Indexing (REQ-CORE-010/011) ----------
 
 export type { CodeSymbol, SymbolKind } from "./indexer/types.js";
@@ -110,6 +132,8 @@ export {
 
 // ---------- Shared types ----------
 
+import type { ConfidenceBands, RetrievalMode } from "./config/types.js";
+
 /** Engine version recorded in run-artifact provenance (REQ-CORE-071); keep in lockstep with package.json. */
 export const CORE_VERSION = "0.1.0";
 
@@ -125,16 +149,6 @@ export interface Provenance {
   promptVersion?: string;
   confidenceBands: ConfidenceBands;
 }
-
-export type RetrievalMode = "lexical" | "semantic" | "hybrid"; // Configs A/B/C
-
-export interface ConfidenceBands {
-  suggest: number;  // default 0.75 (REQ-CORE-041)
-  review: number;   // default 0.50
-}
-
-/** Default bands per REQ-CORE-041; tuned values replace these post-evaluation. */
-export const DEFAULT_CONFIDENCE_BANDS: ConfidenceBands = { suggest: 0.75, review: 0.5 };
 
 /** Convert an OS path to the POSIX form used in all stored artifacts (CLAUDE.md rule 4). */
 export function toPosixPath(p: string): string {

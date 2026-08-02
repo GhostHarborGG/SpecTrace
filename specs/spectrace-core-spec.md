@@ -95,7 +95,7 @@ that contract.
 | [REQ-CORE-001](requirements/REQ-CORE-001.md) | Schema fields | P0 | implemented |
 | [REQ-CORE-002](requirements/REQ-CORE-002.md) | Validation rules | P0 | implemented |
 | [REQ-CORE-003](requirements/REQ-CORE-003.md) | Specification templates | P1 | proposed |
-| [REQ-CORE-004](requirements/REQ-CORE-004.md) | Configuration file | P0 | proposed |
+| [REQ-CORE-004](requirements/REQ-CORE-004.md) | Configuration file | P0 | implemented |
 <!-- spectrace:end -->
 
 **Mandatory fields are `id`, `title`, and `status`**; `priority` (default

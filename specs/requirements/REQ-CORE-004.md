@@ -2,7 +2,7 @@
 id: REQ-CORE-004
 title: Configuration file
 spec: SPEC-CORE-000
-status: proposed
+status: implemented
 priority: P0
 links: []
 acceptance_criteria:
