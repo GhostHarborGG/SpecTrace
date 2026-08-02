@@ -2,7 +2,7 @@
 id: SPEC-APP-000
 title: SpecTrace Studio — Product Specification
 status: Draft
-version: 0.2.0
+version: 0.3.0
 owner: Brian Parker (Ghost Harbor LLC)
 created: 2026-08-01
 depends-on: "@spectrace/core (CLI proof of concept, CPSC 597)"
@@ -96,213 +96,105 @@ Plain markdown files in a git-backed vault are the single source of truth. The a
 
 ## 4. Functional requirements
 
-Requirements follow the SpecTrace schema: stable ID, rationale, acceptance criteria, status, priority. Trace links are empty until implementation begins and will be populated by SpecTrace itself. Phrasing follows EARS where applicable.
+Requirements follow the SpecTrace schema: stable ID, rationale, acceptance
+criteria, status, priority. Phrasing follows EARS where applicable.
+
+**Requirement bodies live in `specs/requirements/`, one file per
+requirement.** This document carries the narrative — what each group is for
+and how the pieces relate. The tables below are **generated** from requirement
+frontmatter by `pnpm spec:index` and CI fails if they have diverged; to
+change a title, priority, or status, edit the requirement file. Trace links
+are empty until implementation begins and will be populated by SpecTrace
+itself.
 
 ### 4.1 Vault and editing
 
----
-**REQ-APP-001 — Open and manage a vault**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The vault is the unit of everything else; without Obsidian-grade vault ergonomics the product has no wedge.
-- **Requirement:** The application shall open a local directory as a vault, display its markdown files in a navigable file tree, and support creating, renaming, moving, and deleting files and folders.
-- **Acceptance criteria:**
-  - AC1: Opening a directory containing markdown files displays them in a file tree within 2 s for vaults up to 1,000 files.
-  - AC2: File operations performed in Studio are ordinary filesystem operations, visible to external tools immediately.
-  - AC3: Files edited externally while the vault is open are detected and reloaded (or a conflict prompt shown if the buffer is dirty).
+The vault is the unit of everything else: a local directory of markdown that
+Studio opens, navigates, and edits with the ergonomics a spec author already
+expects from Obsidian or Outline. Frontmatter is where the SpecTrace schema
+lives, so the editor's job is to make schema compliance easy rather than
+policed — templates that start valid, violations surfaced inline, trace links
+rendered as navigable chips instead of raw YAML.
 
----
-**REQ-APP-002 — Markdown editing with live preview**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Editing must feel like Obsidian/Outline, not a plain textarea; this is the adoption bar.
-- **Requirement:** The editor shall support CommonMark + GFM (tables, task lists, fenced code) with an Obsidian-style live preview mode in which formatting renders in place while remaining editable as markdown.
-- **Acceptance criteria:**
-  - AC1: Round-tripping a file through the editor produces no diff beyond the user's edits.
-  - AC2: Headings, emphasis, lists, tables, code blocks, and links render in live preview.
-  - AC3: A raw-source mode is always available per pane.
-
----
-**REQ-APP-003 — Wiki-links and backlinks**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Backlinks are the mechanism by which a spec becomes a knowledge base rather than a folder of documents.
-- **Requirement:** The editor shall support `[[wiki-link]]` syntax with autocomplete against vault files and requirement IDs, and every document shall display a backlinks panel listing documents that link to it.
-- **Acceptance criteria:**
-  - AC1: Typing `[[` opens autocomplete over file names, aliases, and requirement IDs.
-  - AC2: Renaming a file offers to update inbound wiki-links.
-  - AC3: Backlinks panel updates within 1 s of a link being created elsewhere in the vault.
-
----
-**REQ-APP-004 — Frontmatter-aware requirement documents**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The SpecTrace schema lives in frontmatter; the editor must make schema compliance easy rather than policed.
-- **Requirement:** When a document matches the SpecTrace requirement schema, the application shall render frontmatter (ID, status, priority, trace links) as an editable properties panel, validate it against the schema from `@spectrace/core`, and surface violations (duplicate IDs, missing acceptance criteria) inline.
-- **Acceptance criteria:**
-  - AC1: Creating a document from a requirement template produces schema-valid frontmatter with a unique generated ID.
-  - AC2: A duplicate ID anywhere in the vault is flagged in both offending documents within 2 s.
-  - AC3: Trace-link entries in frontmatter render as navigable chips, not raw YAML.
-
----
-**REQ-APP-005 — Specification templates**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Mirrors the CLI's Step 2 deliverable; templates are how a team without specs gets started.
-- **Requirement:** The application shall ship the core's templates (use case, functional requirement, non-functional requirement, ASR, acceptance criteria) as new-document options, and shall support user-defined templates in the vault.
-- **Acceptance criteria:**
-  - AC1: All core templates are available from the new-document flow.
-  - AC2: A markdown file in `.spectrace/templates/` appears as a template option without restart.
+<!-- spectrace:begin REQ-APP-00 -->
+| ID | Title | Priority | Status |
+|---|---|---|---|
+| [REQ-APP-001](requirements/REQ-APP-001.md) | Open and manage a vault | P0 | partial |
+| [REQ-APP-002](requirements/REQ-APP-002.md) | Markdown editing with live preview | P0 | proposed |
+| [REQ-APP-003](requirements/REQ-APP-003.md) | Wiki-links and backlinks | P0 | proposed |
+| [REQ-APP-004](requirements/REQ-APP-004.md) | Frontmatter-aware requirement documents | P0 | proposed |
+| [REQ-APP-005](requirements/REQ-APP-005.md) | Specification templates | P1 | proposed |
+<!-- spectrace:end -->
 
 ### 4.2 Repository connection and analysis
 
----
-**REQ-APP-010 — Connect a GitHub repository (read-only)**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The repo connection is the product's differentiator; read-only scope keeps the security story trivial.
-- **Requirement:** The application shall connect a vault to one GitHub repository using a fine-grained personal access token with read-only contents permission, validate the token's scope on entry, and refuse tokens with write permissions.
-- **Acceptance criteria:**
-  - AC1: A token with write scope is rejected with an explanation.
-  - AC2: Connection state (repo, branch, last-synced commit SHA) is visible in the UI at all times.
-  - AC3: Tokens are stored in the OS keychain, never in the vault.
+This is the differentiator: a spec vault that knows about a codebase. The
+connection is read-only by construction — a token carrying write scope is
+refused outright — and the repository is mirrored into a cache keyed by commit
+SHA so that analysis is reproducible and rate-limit-safe. Everything
+downstream indexes the cache, never the API. Studio adds progress, cost
+visibility, and cancellation on top of the engine's pipeline, but the results
+must match an equivalent CLI invocation at the same core version.
 
----
-**REQ-APP-011 — Repository sync and local cache**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Analysis must be reproducible and rate-limit-safe (AD-3); the API is a transport, not a data store.
-- **Requirement:** The application shall mirror the connected repository's tracked source files into a local cache keyed by commit SHA, syncing on demand and on a configurable interval, honoring the core's exclusion configuration (generated/vendored/minified paths), and shall run all indexing against the cache.
-- **Acceptance criteria:**
-  - AC1: Two analysis runs against the same SHA produce identical indexes with zero API calls on the second run.
-  - AC2: Sync of a 5,000-file repository delta completes without exceeding GitHub secondary rate limits.
-  - AC3: The UI shows cache size and offers cache eviction per repository.
-
----
-**REQ-APP-012 — Run analysis (index, retrieve, rank)**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** This is the core loop; Studio adds progress, cost visibility, and interruption on top of the engine.
-- **Requirement:** The application shall run the core's pipeline (index → candidate retrieval → optional LLM ranking) over the vault's requirements against the cached repository, displaying per-stage progress, live token/cost accounting, and supporting cancellation; results shall be identical to an equivalent CLI invocation at the same core version.
-- **Acceptance criteria:**
-  - AC1: A run over the controlled evaluation repository matches CLI output byte-for-byte at the proposal/index level.
-  - AC2: Estimated cost is shown before the LLM stage starts and actual cost after it completes.
-  - AC3: Cancelling mid-run leaves the last completed stage's artifacts intact.
-
----
-**REQ-APP-013 — Link review queue**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Human confirmation is the engine's trust model; a GUI queue is where Studio most improves on the CLI.
-- **Requirement:** The application shall present proposed links in a review queue grouped by the core's confidence bands (auto-suggest > 0.75; review 0.50–0.74; discarded < 0.50 available under a toggle), showing for each proposal the requirement, candidate symbol with source preview, confidence, and model rationale; the reviewer shall be able to accept, reject, or redirect each proposal, with every decision recorded with reviewer, timestamp, and commit SHA.
-- **Acceptance criteria:**
-  - AC1: Accepting a proposal writes the link to the requirement's frontmatter and the index, matching CLI storage exactly.
-  - AC2: Keyboard-only triage (next/accept/reject/redirect) is possible.
-  - AC3: Redirect allows searching the symbol index and attaching the corrected target.
-  - AC4: The decision audit record is exportable as JSON.
-
----
-**REQ-APP-014 — Bidirectional navigation**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** Navigation is the payoff of every accepted link; both directions must be first-class.
-- **Requirement:** From a requirement document, the application shall list linked code units with source previews; from any symbol in the symbol index, the application shall list the requirements linked to it; each direction shall be reachable in one action from the other.
-- **Acceptance criteria:**
-  - AC1: A requirement's linked-symbols panel opens read-only source at the symbol's current location in the cached SHA.
-  - AC2: Symbol search ("which requirements touch `AuthService.login`?") returns results in under 500 ms on the controlled repo.
-  - AC3: Broken links (symbol no longer resolves) are visually distinct, not hidden.
+<!-- spectrace:begin REQ-APP-01 -->
+| ID | Title | Priority | Status |
+|---|---|---|---|
+| [REQ-APP-010](requirements/REQ-APP-010.md) | Connect a GitHub repository (read-only) | P0 | proposed |
+| [REQ-APP-011](requirements/REQ-APP-011.md) | Repository sync and local cache | P0 | proposed |
+| [REQ-APP-012](requirements/REQ-APP-012.md) | Run analysis (index, retrieve, rank) | P0 | proposed |
+| [REQ-APP-013](requirements/REQ-APP-013.md) | Link review queue | P0 | proposed |
+| [REQ-APP-014](requirements/REQ-APP-014.md) | Bidirectional navigation | P0 | proposed |
+<!-- spectrace:end -->
 
 ### 4.3 Status: coverage and drift
 
----
-**REQ-APP-020 — Coverage dashboard**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** "Implementation coverage per spec item" is half of the product's definition of development status.
-- **Requirement:** The application shall display vault-level and per-document coverage: counts and lists of requirements with accepted links, with proposals pending review, and with no links; each requirement document shall show a status badge derived from this state.
-- **Acceptance criteria:**
-  - AC1: Dashboard totals reconcile exactly with the core's coverage command output.
-  - AC2: Clicking any count opens the corresponding filtered requirement list.
-  - AC3: Badges update without a full re-analysis when a link is accepted or rejected.
+Coverage and drift are the two halves of the question the product exists to
+answer: what is the status of development? Coverage says which requirements
+have implementations; drift says which of those implementations have since
+stopped agreeing with the requirement. Both surface where the reader already
+is — badges in the tree, banners on the document — rather than only in a
+dashboard they have to remember to open.
 
----
-**REQ-APP-021 — Drift surfacing**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** "Spec–code drift detection" is the other half of development status; warnings must land where the reader already is.
-- **Requirement:** After each sync, the application shall run the core's git-aware incremental drift analysis over affected links and surface warnings in three places: a vault-level drift inbox, inline banners on affected requirement documents, and badges in the file tree; each warning shall show the drift category (deleted symbol, suspected rename, requirement changed, suspected semantic contradiction, unimplemented requirement), confidence, rationale, and the implicated commits, and shall be confirmable or dismissible with an audit record.
-- **Acceptance criteria:**
-  - AC1: Each of the five drift scenarios from the CLI evaluation (D1–D5), injected into the connected repo, produces a warning of the correct category after sync.
-  - AC2: Dismissing a warning suppresses it for that link+commit pair only; new commits re-evaluate.
-  - AC3: Deterministic categories (delete/rename) surface without any LLM call or cost.
-
----
-**REQ-APP-022 — Status reporting**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The knowledge base should answer "what's the status of development?" as a shareable artifact, not only an in-app view.
-- **Requirement:** The application shall generate a status report (markdown and JSON) summarizing coverage, open drift warnings by category, review-queue depth, and deltas since a chosen prior commit or date.
-- **Acceptance criteria:**
-  - AC1: The markdown report is itself a valid vault document with wiki-links into the requirements it cites.
-  - AC2: The JSON report is stable-schema'd and versioned for CI or external tooling.
+<!-- spectrace:begin REQ-APP-02 -->
+| ID | Title | Priority | Status |
+|---|---|---|---|
+| [REQ-APP-020](requirements/REQ-APP-020.md) | Coverage dashboard | P0 | proposed |
+| [REQ-APP-021](requirements/REQ-APP-021.md) | Drift surfacing | P0 | proposed |
+| [REQ-APP-022](requirements/REQ-APP-022.md) | Status reporting | P1 | proposed |
+<!-- spectrace:end -->
 
 ### 4.4 Search
 
----
-**REQ-APP-030 — Unified search**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Requirement:** The application shall provide full-text search across vault documents and symbol-index metadata from a single search field, with filters for document type, requirement status, and link state.
-- **Acceptance criteria:**
-  - AC1: Search over a 1,000-file vault returns first results in under 300 ms.
-  - AC2: Requirement-ID exact matches rank first.
+A knowledge base that cannot be searched across both halves — prose and symbol
+metadata — leaves the reader guessing which half holds the answer.
+
+<!-- spectrace:begin REQ-APP-03 -->
+| ID | Title | Priority | Status |
+|---|---|---|---|
+| [REQ-APP-030](requirements/REQ-APP-030.md) | Unified search | P1 | proposed |
+<!-- spectrace:end -->
 
 ### 4.5 Analysis configuration, provenance, and administration
 
-These requirements close the gap between Studio and the full CLI capability set: every configuration, safeguard, and record-keeping behavior in the capstone proposal has a first-class surface in the application. See Appendix A for the full capability traceability matrix.
+These requirements close the gap between Studio and the full CLI capability
+set: every configuration, safeguard, and record-keeping behavior in the
+capstone proposal has a first-class surface in the application. Several are
+Studio surfaces over settings the engine already owns — retrieval mode,
+exclusion patterns, and confidence bands all live in `.spectrace/config.yaml`
+(REQ-CORE-004), which Studio edits rather than shadowing with its own store.
+See Appendix A for the full capability traceability matrix.
 
----
-**REQ-APP-040 — Retrieval configuration (Configurations A/B/C)**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal's three evaluated configurations (A: BM25 lexical; B: embeddings; C: hybrid + LLM ranking) are core capabilities, not internals; users must be able to choose the cost/quality point the evaluation report describes — including running fully offline with no model access.
-- **Requirement:** The application shall expose per-vault analysis settings for retrieval mode (lexical, semantic, hybrid), candidate-set size, and embeddings on/off, defaulting to the configuration the capstone evaluation recommends; configuration A shall run with no LLM or embedding API access whatsoever.
-- **Acceptance criteria:**
-  - AC1: Each of configurations A, B, and C is selectable and produces results matching the CLI under the same configuration.
-  - AC2: With configuration A selected and no API keys present, analysis completes with zero network calls to model providers.
-  - AC3: Candidate-set size changes take effect on the next run without reindexing.
+<!-- spectrace:begin REQ-APP-04 -->
+| ID | Title | Priority | Status |
+|---|---|---|---|
+| [REQ-APP-040](requirements/REQ-APP-040.md) | Retrieval configuration (Configurations A/B/C) | P0 | proposed |
+| [REQ-APP-041](requirements/REQ-APP-041.md) | Repository exclusion configuration | P1 | proposed |
+| [REQ-APP-042](requirements/REQ-APP-042.md) | Confidence threshold configuration | P1 | proposed |
+| [REQ-APP-043](requirements/REQ-APP-043.md) | Run provenance | P0 | proposed |
+| [REQ-APP-044](requirements/REQ-APP-044.md) | Malformed-response and failure reporting | P1 | proposed |
+| [REQ-APP-045](requirements/REQ-APP-045.md) | Index rebuild and full re-analysis | P1 | proposed |
+<!-- spectrace:end -->
 
----
-**REQ-APP-041 — Repository exclusion configuration**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal's indexer honors a .gitignore-style exclusion list for generated, vendored, and minified paths; Studio must let users author it, not just inherit it.
-- **Requirement:** The application shall provide an editor for the core's exclusion configuration with gitignore-style patterns, showing a live count of files currently excluded from indexing.
-- **Acceptance criteria:**
-  - AC1: Pattern edits persist to the core's configuration file in the vault, readable by the CLI unchanged.
-  - AC2: The excluded-file count updates after edit without a full analysis run.
-
----
-**REQ-APP-042 — Confidence threshold configuration**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal defines provisional bands (auto-suggest > 0.75; review 0.50–0.74; discard < 0.50) explicitly as starting points to be tuned; the tuned values are part of the tool's operation and must be user-visible and adjustable.
-- **Requirement:** The application shall display the active confidence bands, allow per-vault adjustment within core-validated ranges, and re-bucket existing unreviewed proposals when bands change; active band values shall be recorded with every analysis result.
-- **Acceptance criteria:**
-  - AC1: Defaults match the core's shipped (evaluation-tuned) values.
-  - AC2: Changing a band re-buckets pending proposals without re-invoking the model.
-  - AC3: Accepted/rejected decisions are never altered by band changes.
-
----
-**REQ-APP-043 — Run provenance**
-- **Priority:** P0 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal commits to reporting every result with the commit, tool configuration, model snapshot, and prompt version that produced it; Studio must preserve that discipline or its results are not comparable to the CLI's or to each other.
-- **Requirement:** The application shall attach a provenance record — repository commit SHA, core version, retrieval configuration, model snapshot identifier, prompt version, and confidence bands — to every proposal, drift warning, and generated report, display it on demand in the UI, and include it in all JSON exports; re-runs shall be diffed against prior proposals rather than silently replacing them.
-- **Acceptance criteria:**
-  - AC1: Any proposal or warning in the UI can reveal its full provenance record in one action.
-  - AC2: Two runs under different model snapshots are stored and displayed as distinct result sets.
-  - AC3: JSON exports validate against a versioned provenance schema shared with the CLI.
-
----
-**REQ-APP-044 — Malformed-response and failure reporting**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal treats malformed model responses as recorded failures, kept separately for evaluation; Studio must surface them, not swallow them.
-- **Requirement:** When a model response fails schema validation, the application shall record the failure with its provenance, exclude it from the review queue, and display a failures panel with counts per run and per requirement; failures shall be exportable alongside decision audit records.
-- **Acceptance criteria:**
-  - AC1: An injected malformed response appears in the failures panel and never as a reviewable proposal.
-  - AC2: Failure counts per run are included in the status report (REQ-APP-022).
-
----
-**REQ-APP-045 — Index rebuild and full re-analysis**
-- **Priority:** P1 · **Status:** Proposed · **Rendition:** 1
-- **Rationale:** The proposal guarantees the generated index is rebuildable from the specifications and repository, and evaluates incremental analysis against full analysis; both operations must be user-invokable.
-- **Requirement:** The application shall provide explicit actions to (a) rebuild `.spectrace/index.json` and all derived state from the vault and cached repository, and (b) run a full re-analysis of all links ignoring incremental scoping, with the UI reporting links evaluated, runtime, and token usage for comparison against the incremental path.
-- **Acceptance criteria:**
-  - AC1: Deleting `.spectrace/index.json` and invoking rebuild restores an index identical to the pre-deletion state at the same SHA.
-  - AC2: Full re-analysis and incremental analysis at the same SHA pair produce consistent drift conclusions, with their runtime and token counts displayed side by side.
 
 ## 5. Non-functional requirements
 
@@ -368,6 +260,21 @@ Rendition 1 is single-user by design; multi-user is a product requirement, not a
 - **Coverage** — the proportion and identity of requirements with accepted trace links.
 - **Drift** — a detected inconsistency between a requirement and its linked code, in one of five categories (D1–D5).
 - **Core** — `@spectrace/core`, the analysis engine proven by the SpecTrace CLI capstone.
+
+## Document evolution
+
+- **v0.3.0 (2026-08-02)** — REQ-APP-001…045 extracted to
+  `specs/requirements/`, one file per requirement, matching the treatment
+  REQ-CORE and REQ-CLI received at the Phase B schema freeze. IDs unchanged.
+  §4's tables are now generated from requirement frontmatter by
+  `pnpm spec:index`, so title, priority, and status have a single source of
+  truth. The vault `spectrace validate` walks grew from 35 requirements to 55.
+- NFR-APP items stay in this document rather than becoming requirement files:
+  they are application-wide properties without their own acceptance criteria,
+  and REQ-CORE-002 rejects a requirement document lacking one. Revisit if a
+  future NFR acquires testable criteria of its own.
+- Appendix A should re-point its matrix rows from proposal steps to REQ-CORE
+  and REQ-CLI IDs, now that those documents exist.
 
 ## Appendix A — CLI capability traceability matrix
 

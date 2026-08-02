@@ -3,11 +3,11 @@
 Requirements traceability for Markdown specs ↔ TypeScript code.
 **`specs/` is authoritative.** Every task maps to a requirement ID.
 Requirement bodies live one-per-file in `specs/requirements/`
-(REQ-CORE-xxx, REQ-CLI-xxx); the narrative documents that index them
-are specs/spectrace-core-spec.md (the engine) and
-specs/spectrace-cli-spec.md (the command surface). REQ-APP-xxx are
-still inline in specs/spectrace-product-spec.md. If a task has no
-REQ ID, ask for one or propose a spec change first.
+(REQ-CORE-xxx, REQ-CLI-xxx, REQ-APP-xxx); the narrative documents that
+index them are specs/spectrace-core-spec.md (the engine),
+specs/spectrace-cli-spec.md (the command surface), and
+specs/spectrace-product-spec.md (Studio). If a task has no REQ ID,
+ask for one or propose a spec change first.
 
 ## Commands
 - `pnpm install` · `pnpm build` · `pnpm test` · `pnpm typecheck`

@@ -63,6 +63,30 @@ describe("readVault — REQ-APP-001 (open and manage a vault)", () => {
   it("returns a summary that survives structuredClone (Electron IPC)", () => {
     expect(() => structuredClone(readVault(root))).not.toThrow();
   });
+
+  it("AC1: builds the tree for a 1,000-file vault within the 2 s budget", () => {
+    const big = mkdtempSync(join(tmpdir(), "studio-vault-1k-"));
+    try {
+      // Spread across folders rather than one flat directory, so the recursion
+      // is exercised the way a real spec vault would exercise it.
+      for (let folder = 0; folder < 20; folder++) {
+        const dir = join(big, `area-${folder}`);
+        mkdirSync(dir, { recursive: true });
+        for (let file = 0; file < 50; file++) {
+          writeFileSync(join(dir, `REQ-${folder}-${file}.md`), "# Requirement\n", "utf8");
+        }
+      }
+
+      const started = performance.now();
+      const summary = readVault(big);
+      const elapsedMs = performance.now() - started;
+
+      expect(summary.fileCount).toBe(1000);
+      expect(elapsedMs).toBeLessThan(2000);
+    } finally {
+      rmSync(big, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("readVaultFile — REQ-APP-001", () => {

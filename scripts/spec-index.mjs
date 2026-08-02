@@ -25,7 +25,11 @@ import { join } from "node:path";
 import { parse } from "yaml";
 
 const REQUIREMENTS_DIR = "specs/requirements";
-const NARRATIVE_DOCS = ["specs/spectrace-core-spec.md", "specs/spectrace-cli-spec.md"];
+const NARRATIVE_DOCS = [
+  "specs/spectrace-core-spec.md",
+  "specs/spectrace-cli-spec.md",
+  "specs/spectrace-product-spec.md"
+];
 const DEFAULT_PRIORITY = "P1"; // REQ-CORE-001: priority is optional.
 
 const BLOCK = /(<!-- spectrace:begin ([A-Za-z0-9-]+) -->\r?\n)([\s\S]*?)(<!-- spectrace:end -->)/g;
