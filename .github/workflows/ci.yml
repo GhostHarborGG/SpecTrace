@@ -15,6 +15,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
+      # build first: @spectrace/cli resolves @spectrace/core through its
+      # published `types` (dist/index.d.ts), which only exists post-build.
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm test
