@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -154,6 +154,149 @@ describe("analyze → evaluate retrieval (REQ-CLI-009 end-to-end)", () => {
       "--ground-truth", groundTruthFile
     ]);
     expect(status).toBe(1);
+  });
+});
+
+describe("spectrace init (REQ-CLI-001)", () => {
+  let tmp: string;
+
+  const CONFIG = ".spectrace/config.yaml";
+
+  /** Every file under a directory, as path → contents, for exact-equality diffing. */
+  function snapshotTree(root: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walk(full, rel);
+        else out[rel] = readFileSync(full, "utf8");
+      }
+    };
+    walk(root, "");
+    return out;
+  }
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), "spectrace-init-"));
+  });
+
+  afterAll(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function freshRepo(name: string): string {
+    const repo = path.join(tmp, name);
+    mkdirSync(repo, { recursive: true });
+    return repo;
+  }
+
+  it("AC1: creates the configuration file with defaults and a templates directory", () => {
+    const repo = freshRepo("fresh");
+    const { stdout, status } = run(["init", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(status).toBe(0);
+    expect(report.artifact).toBe("spectrace.init-report");
+    expect(report.version).toBe(1);
+    expect(report.created).toContain(CONFIG);
+    expect(report.skipped).toEqual([]);
+
+    // A templates directory with one file per specced template kind.
+    const templates = report.created.filter((p: string) => p.startsWith(".spectrace/templates/"));
+    expect(templates).toHaveLength(5);
+    expect(existsSync(path.join(repo, CONFIG))).toBe(true);
+  });
+
+  it("AC1: the scaffolded config is what the engine already defaults to", () => {
+    const repo = freshRepo("defaults-match");
+    run(["init", "--repo", repo]);
+
+    // A freshly initialized repo must validate identically to a bare one.
+    writeFileSync(path.join(repo, CONFIG), readFileSync(path.join(repo, CONFIG), "utf8"), "utf8");
+    mkdirSync(path.join(repo, "specs", "requirements"), { recursive: true });
+    writeFileSync(
+      path.join(repo, "specs", "requirements", "REQ-Z-001.md"),
+      "---\nid: REQ-Z-001\ntitle: T\nstatus: proposed\nacceptance_criteria:\n  - x\n---\n",
+      "utf8"
+    );
+
+    const report = JSON.parse(run(["validate", "--repo", repo, "--json"]).stdout);
+    expect(report.specPaths).toEqual(["specs/requirements"]);
+    expect(report.valid).toBe(true);
+    // No missing-config warning: init wrote a real one.
+    expect(report.warnings.some((w: { rule: string }) => w.rule === "missing-config")).toBe(false);
+  });
+
+  it("AC1: every scaffolded template validates unedited (REQ-CORE-003 AC1 end to end)", () => {
+    const repo = freshRepo("templates-valid");
+    run(["init", "--repo", repo]);
+
+    // Point a vault at the scaffolded templates and validate them as documents.
+    writeFileSync(path.join(repo, CONFIG), "version: 1\nspecPaths:\n  - .spectrace/templates\n", "utf8");
+    const report = JSON.parse(run(["validate", "--repo", repo, "--json"]).stdout);
+
+    expect(report.violations).toEqual([]);
+    expect(report.requirementCount).toBe(5);
+  });
+
+  it("AC2: running init a second time leaves the repository unchanged and exits 0", () => {
+    const repo = freshRepo("idempotent");
+    run(["init", "--repo", repo]);
+    const before = snapshotTree(path.join(repo, ".spectrace"));
+
+    const { stdout, status } = run(["init", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+    const after = snapshotTree(path.join(repo, ".spectrace"));
+
+    expect(status).toBe(0);
+    expect(report.created).toEqual([]);
+    expect(report.overwritten).toEqual([]);
+    expect(report.skipped).toHaveLength(6);
+    expect(after).toEqual(before);
+  });
+
+  it("AC3: an existing file is never overwritten without --force", () => {
+    const repo = freshRepo("no-clobber");
+    run(["init", "--repo", repo]);
+    const edited = "version: 1\n# hand-edited by the developer\nspecPaths:\n  - docs/reqs\n";
+    writeFileSync(path.join(repo, CONFIG), edited, "utf8");
+
+    const { status } = run(["init", "--repo", repo]);
+
+    expect(status).toBe(0);
+    expect(readFileSync(path.join(repo, CONFIG), "utf8")).toBe(edited);
+  });
+
+  it("AC3: --force overwrites an existing file", () => {
+    const repo = freshRepo("forced");
+    run(["init", "--repo", repo]);
+    writeFileSync(path.join(repo, CONFIG), "version: 1\nspecPaths:\n  - docs/reqs\n", "utf8");
+
+    const { stdout, status } = run(["init", "--repo", repo, "--force", "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(status).toBe(0);
+    expect(report.overwritten).toContain(CONFIG);
+    expect(readFileSync(path.join(repo, CONFIG), "utf8")).toContain("specs/requirements");
+  });
+
+  it("AC3: --force restores only what it rewrites, leaving unrelated files alone", () => {
+    const repo = freshRepo("force-scope");
+    run(["init", "--repo", repo]);
+    writeFileSync(path.join(repo, ".spectrace", "notes.md"), "developer notes\n", "utf8");
+
+    run(["init", "--repo", repo, "--force"]);
+
+    expect(readFileSync(path.join(repo, ".spectrace", "notes.md"), "utf8")).toBe("developer notes\n");
+  });
+
+  it("exits 1 when the repository path does not exist", () => {
+    expect(run(["init", "--repo", path.join(tmp, "nope")]).status).toBe(1);
+  });
+
+  it("runs non-interactively with no TTY (SPEC-CLI-000 §3 AC3)", () => {
+    expect(run(["init", "--repo", freshRepo("ci-init"), "--json"]).status).toBe(0);
   });
 });
 

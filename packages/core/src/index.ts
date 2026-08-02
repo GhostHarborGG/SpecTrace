@@ -74,7 +74,8 @@ export {
   DEFAULT_CONFIDENCE_BANDS,
   CONFIG_FILE_RELATIVE_PATH,
   CONFIG_VERSION,
-  RETRIEVAL_MODES
+  RETRIEVAL_MODES,
+  renderDefaultConfig
 } from "./config/types.js";
 export { parseConfig } from "./config/parse.js";
 export { loadConfig } from "./config/load.js";

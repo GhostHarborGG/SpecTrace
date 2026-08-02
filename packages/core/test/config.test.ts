@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config/parse.js";
 import { loadConfig } from "../src/config/load.js";
-import { CONFIG_FILE_RELATIVE_PATH, DEFAULT_CONFIG } from "../src/config/types.js";
+import { CONFIG_FILE_RELATIVE_PATH, DEFAULT_CONFIG, renderDefaultConfig } from "../src/config/types.js";
 
 describe("parseConfig / loadConfig — REQ-CORE-004 (configuration file)", () => {
   let scratchRoot: string;
@@ -167,6 +167,20 @@ describe("parseConfig / loadConfig — REQ-CORE-004 (configuration file)", () =>
 
   it("defaults match the REQ-CORE-041 provisional threshold policy", () => {
     expect(DEFAULT_CONFIG.bands).toEqual({ suggest: 0.75, review: 0.5 });
+  });
+
+  it("the rendered default config round-trips to DEFAULT_CONFIG exactly", () => {
+    // What `spectrace init` writes must parse back to the built-in defaults,
+    // or a freshly initialized repository would behave unlike an empty one.
+    const result = parseConfig(renderDefaultConfig());
+
+    expect(result.warnings).toEqual([]);
+    expect(result.config).toEqual(DEFAULT_CONFIG);
+  });
+
+  it("the rendered default config carries explanatory comments", () => {
+    // Comments are why YAML was chosen over JSON (REQ-CORE-004 notes).
+    expect(renderDefaultConfig()).toMatch(/^#/m);
   });
 });
 

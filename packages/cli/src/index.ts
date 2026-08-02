@@ -12,10 +12,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
   ArtifactFormatError,
+  CONFIG_FILE_RELATIVE_PATH,
   CORE_VERSION,
   DEFAULT_BM25F_CONFIG,
   DuplicateSymbolIdIndexError,
+  TEMPLATES,
   evaluateRetrieval,
+  instantiateTemplate,
+  renderDefaultConfig,
+  toPosixPath,
   indexRepository,
   loadConfig,
   parseRetrievalResults,
@@ -62,7 +67,70 @@ function readSymbols(filePath: string): CodeSymbol[] {
     .map((line) => JSON.parse(line) as CodeSymbol);
 }
 
-program.command("init").description("Scaffold .spectrace/ config and templates").action(stub("REQ-CLI-001", "Phase B"));
+/** Envelope for `init --json`; versioned per SPEC-CLI-000 §3 AC1. */
+const INIT_REPORT_ARTIFACT = "spectrace.init-report";
+const INIT_REPORT_VERSION = 1;
+
+program
+  .command("init")
+  .description("Scaffold .spectrace/ config and templates (REQ-CLI-001)")
+  .option("--repo <path>", "repository root to scaffold", ".")
+  .option("--force", "overwrite files that already exist", false)
+  .option("--json", "machine-readable output on stdout")
+  .action((opts: { repo: string; force: boolean; json?: boolean }, cmd: Command) => {
+    const repo = resolve(opts.repo);
+    if (!existsSync(repo)) {
+      fail({ error: "missing_repo", message: `${repo} does not exist.` }, 1);
+      return;
+    }
+
+    // Config content and template content both come from core — the CLI only
+    // decides where the bytes land (SPEC-CLI-000 §1).
+    const files: { relativePath: string; content: string }[] = [
+      { relativePath: CONFIG_FILE_RELATIVE_PATH, content: renderDefaultConfig() },
+      ...TEMPLATES.map((template) => ({
+        relativePath: `.spectrace/templates/${template.fileName}`,
+        content: instantiateTemplate({ kind: template.kind }).content
+      }))
+    ];
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const overwritten: string[] = [];
+
+    for (const file of files) {
+      const absolute = resolve(repo, file.relativePath);
+      const exists = existsSync(absolute);
+      if (exists && !opts.force) {
+        // Idempotent by default: an existing file is never rewritten (AC2, AC3).
+        skipped.push(file.relativePath);
+        continue;
+      }
+      mkdirSync(dirname(absolute), { recursive: true });
+      writeFileSync(absolute, file.content, "utf8");
+      (exists ? overwritten : created).push(file.relativePath);
+    }
+
+    if (cmd.optsWithGlobals().json) {
+      printJson(process.stdout, {
+        artifact: INIT_REPORT_ARTIFACT,
+        version: INIT_REPORT_VERSION,
+        repositoryRoot: toPosixPath(repo),
+        created,
+        skipped,
+        overwritten
+      });
+    } else {
+      for (const path of created) process.stdout.write(`created     ${path}\n`);
+      for (const path of overwritten) process.stdout.write(`overwritten ${path}\n`);
+      for (const path of skipped) process.stdout.write(`exists      ${path}\n`);
+      process.stdout.write(
+        created.length === 0 && overwritten.length === 0
+          ? `Nothing to do — .spectrace/ is already scaffolded (use --force to overwrite).\n`
+          : `Scaffolded ${created.length + overwritten.length} file(s) in ${toPosixPath(repo)}.\n`
+      );
+    }
+  });
 
 /** Envelope for `validate --json`; versioned per SPEC-CLI-000 §3 AC1. */
 const VALIDATION_REPORT_ARTIFACT = "spectrace.validation-report";

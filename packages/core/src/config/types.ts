@@ -69,6 +69,49 @@ export const DEFAULT_CONFIG: SpectraceConfig = {
   bands: { ...DEFAULT_CONFIDENCE_BANDS }
 };
 
+/**
+ * The canonical serialization of {@link DEFAULT_CONFIG}, comments and all —
+ * what `spectrace init` writes (REQ-CLI-001) and what Studio's settings
+ * surfaces scaffold. It lives here because REQ-CORE-004 owns the format; its
+ * round-trip equality with DEFAULT_CONFIG is enforced by test.
+ *
+ * Comments are the reason YAML was chosen over JSON, so the default file
+ * explains itself rather than being a bare value dump.
+ */
+export function renderDefaultConfig(): string {
+  return `# SpecTrace configuration (REQ-CORE-004).
+# Every key is optional — anything omitted falls back to the built-in default,
+# and an unrecognized key is reported as a warning rather than an error.
+version: ${CONFIG_VERSION}
+
+# Directories holding requirement documents, relative to this repository.
+specPaths:
+  - specs/requirements
+
+# Extra gitignore-style patterns excluded from indexing (REQ-CORE-011).
+# Generated, vendored, and minified paths are already excluded by default.
+exclude: []
+
+retrieval:
+  # lexical (Configuration A) | semantic (B) | hybrid (C)
+  mode: lexical
+  # Candidate count k retained per requirement.
+  topK: 10
+
+model:
+  # Ranking model (REQ-CORE-030); null until ranking lands.
+  ranking: null
+  # Embedding model (REQ-CORE-021); unused in Configuration A.
+  embedding: null
+
+# Confidence bands (REQ-CORE-041). Provisional defaults — the capstone
+# evaluation replaces them with tuned values.
+bands:
+  suggest: 0.75
+  review: 0.5
+`;
+}
+
 export type ConfigWarningRule = "missing-config" | "unknown-key" | "invalid-value";
 
 /**
