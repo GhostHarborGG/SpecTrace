@@ -24,7 +24,9 @@ spec version in its `depends-on` header.
 
 **Requirement bodies live in `specs/requirements/`,** one file per
 requirement, as they do for the core spec. This document carries the narrative
-and the surface-wide contract; §3's table indexes the individual files.
+and the surface-wide contract; §3's table indexes the individual files and is
+**generated** from their frontmatter by `pnpm spec:index` — edit the
+requirement file, not the table.
 
 ## 1. Purpose and scope
 
@@ -58,17 +60,19 @@ versioned schemas shared with SPEC-APP-000); human-readable output otherwise;
 diagnostics on stderr; exit code 0 success, 1 operational failure, 2 usage
 error, 3 validation failure.
 
-| ID | Command | Priority | Status |
+<!-- spectrace:begin REQ-CLI-00 -->
+| ID | Title | Priority | Status |
 |---|---|---|---|
-| [REQ-CLI-001](requirements/REQ-CLI-001.md) | `spectrace init` | P0 | Proposed |
-| [REQ-CLI-002](requirements/REQ-CLI-002.md) | `spectrace validate` | P0 | Proposed |
-| [REQ-CLI-003](requirements/REQ-CLI-003.md) | `spectrace index` | P0 | Partial |
-| [REQ-CLI-004](requirements/REQ-CLI-004.md) | `spectrace analyze` | P0 | Proposed |
-| [REQ-CLI-005](requirements/REQ-CLI-005.md) | `spectrace review` | P0 | Proposed |
-| [REQ-CLI-006](requirements/REQ-CLI-006.md) | `spectrace links` | P0 | Proposed |
-| [REQ-CLI-007](requirements/REQ-CLI-007.md) | `spectrace coverage` | P0 | Proposed |
-| [REQ-CLI-008](requirements/REQ-CLI-008.md) | `spectrace drift` | P0 | Proposed |
-| [REQ-CLI-009](requirements/REQ-CLI-009.md) | `spectrace evaluate` | P0 | Implemented |
+| [REQ-CLI-001](requirements/REQ-CLI-001.md) | spectrace init | P0 | proposed |
+| [REQ-CLI-002](requirements/REQ-CLI-002.md) | spectrace validate | P0 | proposed |
+| [REQ-CLI-003](requirements/REQ-CLI-003.md) | spectrace index | P0 | partial |
+| [REQ-CLI-004](requirements/REQ-CLI-004.md) | spectrace analyze | P0 | proposed |
+| [REQ-CLI-005](requirements/REQ-CLI-005.md) | spectrace review | P0 | proposed |
+| [REQ-CLI-006](requirements/REQ-CLI-006.md) | spectrace links | P0 | proposed |
+| [REQ-CLI-007](requirements/REQ-CLI-007.md) | spectrace coverage | P0 | proposed |
+| [REQ-CLI-008](requirements/REQ-CLI-008.md) | spectrace drift | P0 | proposed |
+| [REQ-CLI-009](requirements/REQ-CLI-009.md) | spectrace evaluate | P0 | implemented |
+<!-- spectrace:end -->
 
 **Surface-wide acceptance criteria** — these apply to every command above, in
 addition to each command's own criteria:

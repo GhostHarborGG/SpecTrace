@@ -72,12 +72,13 @@ Create these in the Phase A scaffold:
 
 **Proposal milestone:** schema and templates approved; ground-truth links frozen and recorded.
 
-- **You:** decide config format (YAML vs JSON — REQ-CORE-004 open item); approve schema field semantics; freeze ground truth (two-pass protocol, second-pass additions recorded as threat to validity); label everything yourself.
+- **You:** decide config format (YAML vs JSON — REQ-CORE-004 open item); approve schema field semantics.
+- **Ground truth is already frozen and will not change (BP, 2026-08-02).** `fixtures/ground-truth/hookable.json` (24 links, BP-labeled) and the HOOK-001…012 requirement set were frozen during Phase A, hashes recorded in `fixtures/experiment/requirements.sha256` and verified intact. The two-pass labeling protocol and its threat-to-validity note are Phase A history, not Phase B work; this milestone row is discharged. Nothing in Phases B–H re-opens the labels.
 - **Chat:** schema design review against REQ-CORE-001…003; split `spectrace-core-spec.md` out of the CLI spec now — the schema freeze is exactly when that contract stabilizes.
 - **Claude Code:**
   - Implement REQ-CORE-001…004 (schema, validation, templates, config) + REQ-CLI-001/002 (`init`, `validate`) with full AC test coverage.
   - **Studio setup-plan Phase 3 begins in parallel** (small, bounded sessions): electron-vite scaffold, walking skeleton — folder picker → tree → markdown preview (REQ-APP-001 partial, REQ-APP-002 preview half).
-- **Gate:** `spectrace init && spectrace validate` works on `specs/`; your own spec documents validate (they're already in the schema — fix whichever side is wrong, and note that this is the product working); Studio opens the vault read-only.
+- **Gate:** `spectrace init && spectrace validate` works on `specs/`; every file in `specs/requirements/` validates (that is the vault — the narrative `*-spec.md` documents are not requirement documents and are not walked, decided 2026-08-02 by BP); Studio opens the vault read-only.
 
 ## Phase C — Indexing & Retrieval, Evaluated
 

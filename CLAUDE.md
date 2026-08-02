@@ -12,6 +12,10 @@ REQ ID, ask for one or propose a spec change first.
 ## Commands
 - `pnpm install` · `pnpm build` · `pnpm test` · `pnpm typecheck`
 - `pnpm cli <args>` runs the CLI from source (e.g. `pnpm cli --help`)
+- `pnpm spec:index` regenerates the requirement tables in the narrative
+  `*-spec.md` documents from `specs/requirements/` frontmatter;
+  `pnpm spec:index:check` is the CI guard. Never hand-edit a table between
+  `<!-- spectrace:begin -->` markers — edit the requirement file.
 
 ## Hard rules
 1. **NEVER read or open anything under `fixtures/ground-truth/`.**

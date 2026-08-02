@@ -9,10 +9,13 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "cli": "tsx packages/cli/src/index.ts"
+    "cli": "tsx packages/cli/src/index.ts",
+    "spec:index": "node scripts/spec-index.mjs",
+    "spec:index:check": "node scripts/spec-index.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "yaml": "^2.9.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
