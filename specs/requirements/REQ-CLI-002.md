@@ -2,7 +2,7 @@
 id: REQ-CLI-002
 title: spectrace validate
 spec: SPEC-CLI-000
-status: proposed
+status: implemented
 priority: P0
 links: []
 acceptance_criteria:

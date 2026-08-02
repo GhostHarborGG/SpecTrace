@@ -8,7 +8,7 @@
  */
 import { Command } from "commander";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
   ArtifactFormatError,
@@ -17,14 +17,18 @@ import {
   DuplicateSymbolIdIndexError,
   evaluateRetrieval,
   indexRepository,
+  loadConfig,
   parseRetrievalResults,
+  readRequirementDocuments,
   retrieveCandidates,
   serializeMetricsReport,
   serializeRetrievalResults,
+  validateRequirements,
   type CandidateSet,
   type CodeSymbol,
   type GroundTruthFile,
   type MetricsArtifact,
+  type RequirementDocument,
   type RunProvenance
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
@@ -59,7 +63,97 @@ function readSymbols(filePath: string): CodeSymbol[] {
 }
 
 program.command("init").description("Scaffold .spectrace/ config and templates").action(stub("REQ-CLI-001", "Phase B"));
-program.command("validate").description("Validate specification documents").action(stub("REQ-CLI-002", "Phase B"));
+
+/** Envelope for `validate --json`; versioned per SPEC-CLI-000 §3 AC1. */
+const VALIDATION_REPORT_ARTIFACT = "spectrace.validation-report";
+const VALIDATION_REPORT_VERSION = 1;
+
+interface ReportedWarning {
+  source: "config" | "schema";
+  rule: string;
+  message: string;
+  key?: string;
+  path?: string;
+}
+
+program
+  .command("validate")
+  .description("Validate specification documents against the requirement schema (REQ-CLI-002)")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml", ".")
+  .option("--json", "machine-readable output on stdout")
+  .action((opts: { repo: string; json?: boolean }, cmd: Command) => {
+    const repo = resolve(opts.repo);
+    if (!existsSync(repo)) {
+      fail({ error: "missing_repo", message: `${repo} does not exist.` }, 1);
+      return;
+    }
+
+    // Specification paths come from configuration and nowhere else (AC1).
+    const { config, warnings: configWarnings } = loadConfig(repo);
+    const warnings: ReportedWarning[] = configWarnings.map((w) => ({
+      source: "config",
+      rule: w.rule,
+      message: w.message,
+      ...(w.key ? { key: w.key } : {})
+    }));
+
+    const documents: RequirementDocument[] = [];
+    for (const specPath of config.specPaths) {
+      const absolute = resolve(repo, specPath);
+      if (!existsSync(absolute)) {
+        warnings.push({
+          source: "config",
+          rule: "missing-spec-path",
+          key: "specPaths",
+          message: `Configured specification path \`${specPath}\` does not exist — nothing validated from it.`
+        });
+        continue;
+      }
+      // Re-root each document on its configured path so messages name a findable file.
+      for (const document of readRequirementDocuments(absolute)) {
+        documents.push({ path: `${specPath}/${document.path}`, content: document.content });
+      }
+    }
+
+    const report = validateRequirements(documents);
+    warnings.push(
+      ...report.warnings.map((w) => ({
+        source: "schema" as const,
+        rule: w.rule,
+        message: w.message,
+        path: w.path
+      }))
+    );
+
+    if (cmd.optsWithGlobals().json) {
+      printJson(process.stdout, {
+        artifact: VALIDATION_REPORT_ARTIFACT,
+        version: VALIDATION_REPORT_VERSION,
+        valid: report.valid,
+        specPaths: config.specPaths,
+        requirementCount: report.requirements.length,
+        documentCount: documents.length,
+        violations: report.violations,
+        warnings
+      });
+    } else {
+      for (const warning of warnings) process.stdout.write(`warning: ${warning.message}\n`);
+      for (const violation of report.violations) {
+        process.stdout.write(`  [${violation.rule}] ${violation.message}\n`);
+      }
+      const scope = config.specPaths.join(", ") || "(no specification paths configured)";
+      process.stdout.write(
+        report.valid
+          ? `${report.requirements.length} requirement(s) in ${scope} — no violations\n`
+          : `${report.violations.length} violation(s) across ${
+              new Set(report.violations.map((v) => v.path)).size
+            } file(s) in ${scope}\n`
+      );
+    }
+
+    // Exit 3 on validation failure, 0 on a clean set (spec §3 exit codes).
+    if (!report.valid) process.exitCode = 3;
+  });
 
 program
   .command("index")

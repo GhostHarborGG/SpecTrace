@@ -156,3 +156,135 @@ describe("analyze → evaluate retrieval (REQ-CLI-009 end-to-end)", () => {
     expect(status).toBe(1);
   });
 });
+
+describe("spectrace validate (REQ-CLI-002)", () => {
+  let tmp: string;
+
+  const VALID = (id: string) =>
+    `---\nid: ${id}\ntitle: A title\nstatus: proposed\nacceptance_criteria:\n  - It does the thing.\n---\n\n# A title\n`;
+
+  /** A repo with a config naming `specPaths`, plus the documents to put there. */
+  function makeRepo(name: string, specPaths: string[], files: Record<string, string>): string {
+    const repo = path.join(tmp, name);
+    mkdirSync(path.join(repo, ".spectrace"), { recursive: true });
+    writeFileSync(
+      path.join(repo, ".spectrace", "config.yaml"),
+      `version: 1\nspecPaths:\n${specPaths.map((p) => `  - ${p}`).join("\n")}\n`,
+      "utf8"
+    );
+    for (const [relative, content] of Object.entries(files)) {
+      const full = path.join(repo, relative);
+      mkdirSync(path.dirname(full), { recursive: true });
+      writeFileSync(full, content, "utf8");
+    }
+    return repo;
+  }
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), "spectrace-validate-"));
+  });
+
+  afterAll(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("AC1: validation covers exactly the specification paths named in configuration", () => {
+    const repo = makeRepo("scoped", ["specs/included"], {
+      "specs/included/REQ-IN-001.md": VALID("REQ-IN-001"),
+      // Broken, but outside every configured path — must not be validated.
+      "specs/excluded/REQ-OUT-001.md": "---\ntitle: no id and no criteria\n---\n"
+    });
+
+    const { stdout, status } = run(["validate", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(status).toBe(0);
+    expect(report.valid).toBe(true);
+    expect(report.specPaths).toEqual(["specs/included"]);
+    expect(report.requirementCount).toBe(1);
+    expect(JSON.stringify(report)).not.toContain("REQ-OUT-001");
+  });
+
+  it("AC1: a second configured path is also covered", () => {
+    const repo = makeRepo("two-paths", ["specs/a", "specs/b"], {
+      "specs/a/REQ-A-001.md": VALID("REQ-A-001"),
+      "specs/b/REQ-B-001.md": VALID("REQ-B-001")
+    });
+
+    const report = JSON.parse(run(["validate", "--repo", repo, "--json"]).stdout);
+    expect(report.requirementCount).toBe(2);
+  });
+
+  it("AC1: a configured path that does not exist is reported as a warning", () => {
+    const repo = makeRepo("missing-path", ["specs/nowhere"], {});
+    const { stdout, status } = run(["validate", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(status).toBe(0);
+    expect(report.warnings.some((w: { rule: string }) => w.rule === "missing-spec-path")).toBe(true);
+  });
+
+  it("AC2: --json emits the full violation list", () => {
+    const repo = makeRepo("violations", ["specs"], {
+      "specs/REQ-NOID.md": "---\ntitle: missing id and status\nacceptance_criteria:\n  - x\n---\n",
+      "specs/REQ-NOAC-001.md": "---\nid: REQ-NOAC-001\ntitle: T\nstatus: proposed\n---\n",
+      "specs/REQ-DUP-a.md": VALID("REQ-DUP-001"),
+      "specs/REQ-DUP-b.md": VALID("REQ-DUP-001")
+    });
+
+    const { stdout } = run(["validate", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(report.artifact).toBe("spectrace.validation-report");
+    expect(report.version).toBe(1);
+    expect(report.valid).toBe(false);
+
+    // Every distinct failure is present, not just the first one found.
+    const rules = new Set(report.violations.map((v: { rule: string }) => v.rule));
+    expect(rules).toEqual(new Set(["missing-field", "no-acceptance-criteria", "duplicate-id"]));
+
+    // Duplicate IDs name each other, and paths are repo-relative and findable.
+    const duplicates = report.violations.filter((v: { rule: string }) => v.rule === "duplicate-id");
+    expect(duplicates).toHaveLength(2);
+    expect(duplicates.find((v: { path: string }) => v.path === "specs/REQ-DUP-a.md").message).toContain(
+      "specs/REQ-DUP-b.md"
+    );
+  });
+
+  it("AC3: a specification set carrying at least one violation exits 3", () => {
+    const repo = makeRepo("exit-three", ["specs"], {
+      "specs/REQ-BAD-001.md": "---\nid: REQ-BAD-001\ntitle: T\nstatus: proposed\n---\n"
+    });
+    expect(run(["validate", "--repo", repo]).status).toBe(3);
+  });
+
+  it("AC3: a clean set exits 0", () => {
+    const repo = makeRepo("exit-zero", ["specs"], { "specs/REQ-OK-001.md": VALID("REQ-OK-001") });
+    const { status, stdout } = run(["validate", "--repo", repo]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("no violations");
+  });
+
+  it("falls back to default specPaths and warns when there is no config file", () => {
+    const repo = path.join(tmp, "no-config");
+    mkdirSync(path.join(repo, "specs", "requirements"), { recursive: true });
+    writeFileSync(path.join(repo, "specs", "requirements", "REQ-D-001.md"), VALID("REQ-D-001"), "utf8");
+
+    const { stdout, status } = run(["validate", "--repo", repo, "--json"]);
+    const report = JSON.parse(stdout);
+
+    expect(status).toBe(0);
+    expect(report.specPaths).toEqual(["specs/requirements"]);
+    expect(report.requirementCount).toBe(1);
+    expect(report.warnings.some((w: { rule: string }) => w.rule === "missing-config")).toBe(true);
+  });
+
+  it("exits 1 when the repository path does not exist", () => {
+    expect(run(["validate", "--repo", path.join(tmp, "nope")]).status).toBe(1);
+  });
+
+  it("runs non-interactively with no TTY (SPEC-CLI-000 §3 AC3)", () => {
+    const repo = makeRepo("ci", ["specs"], { "specs/REQ-CI-001.md": VALID("REQ-CI-001") });
+    expect(run(["validate", "--repo", repo, "--json"]).status).toBe(0);
+  });
+});
