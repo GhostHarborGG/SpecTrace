@@ -39,6 +39,7 @@ export {
 } from "./retrieval/retrieve.js";
 export {
   DEFAULT_BM25F_CONFIG,
+  BM25F_V4_CONFIG,
   BM25F_V3_CONFIG,
   DEFAULT_STOPWORDS,
   type BM25FConfig,

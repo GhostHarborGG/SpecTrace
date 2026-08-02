@@ -65,6 +65,18 @@ export interface BM25FConfig {
    * per-repository hand list is needed.
    */
   protectIdentifierStopwords: boolean;
+  /**
+   * Strength of the containment-derived aggregate prior; `null` disables it.
+   * v2's kind prior covers file/module aggregates but misses container
+   * classes — the largest aggregates in a typical corpus — whose
+   * `normalizedSource` is the union of their members' text, letting term
+   * repetition buried across members outscore the member that implements the
+   * behavior. Deriving the prior from line-span containment covers every
+   * aggregate without a per-kind allowlist. Invariant: a post-score
+   * multiplier < 1 applied only to containers cannot reorder two leaves and
+   * cannot promote a container.
+   */
+  containmentAlpha: number | null;
 }
 
 export type PluralFolderRevision = 1 | 2;
@@ -115,6 +127,40 @@ function effectiveStopwords(symbols: readonly CodeSymbol[], config: BM25FConfig)
 }
 
 /**
+ * How many other indexed symbols each symbol lexically contains, aligned
+ * with `symbols` by position. Containment is same-file plus a spanning
+ * [startLine, endLine] range whose length is strictly greater, so a symbol
+ * never contains itself and two symbols sharing a span never contain each
+ * other. Bucketed by `relativePath` to keep the comparison O(per-file n²).
+ */
+function containedCounts(symbols: readonly CodeSymbol[]): number[] {
+  const byPath = new Map<string, number[]>();
+  symbols.forEach((symbol, position) => {
+    const bucket = byPath.get(symbol.relativePath);
+    if (bucket) bucket.push(position);
+    else byPath.set(symbol.relativePath, [position]);
+  });
+
+  const counts = new Array<number>(symbols.length).fill(0);
+  for (const bucket of byPath.values()) {
+    for (const outer of bucket) {
+      const container = symbols[outer]!;
+      const containerSpan = container.endLine - container.startLine;
+      let count = 0;
+      for (const inner of bucket) {
+        const candidate = symbols[inner]!;
+        if (candidate.endLine - candidate.startLine >= containerSpan) continue;
+        if (container.startLine <= candidate.startLine && container.endLine >= candidate.endLine) {
+          count += 1;
+        }
+      }
+      counts[outer] = count;
+    }
+  }
+  return counts;
+}
+
+/**
  * English function words only — articles, conjunctions, prepositions,
  * pronouns, auxiliaries, copulas. Deliberately excludes anything that can
  * carry meaning in an event/hook domain (`before`, `after`, `once`, `call`).
@@ -131,7 +177,7 @@ export const DEFAULT_STOPWORDS: readonly string[] = [
 ];
 
 /**
- * Configuration A, revision 4. Field weights, k1, and b are unchanged from
+ * Configuration A, revision 5. Field weights, k1, and b are unchanged from
  * prelim spec §9.3's starting values. Relative to v1: v2 added
  * function-word stopwords, a 0.5 prior on file/module aggregate symbols
  * (rationale on the config fields above), and the length-normalization fix
@@ -141,11 +187,14 @@ export const DEFAULT_STOPWORDS: readonly string[] = [
  * v3 adds plural folding. v4 stops v2's stopword list from swallowing
  * function words the corpus uses as identifier morphemes, and takes the
  * corrected plural folder (rationales on `protectIdentifierStopwords` and
- * `foldPlural`). Each revision is a new `configurationId` per §9.3; earlier
- * results remain in their original run directories.
+ * `foldPlural`). v5 adds the containment-derived aggregate prior, which
+ * generalizes v2's file/module kind prior to container symbols of any kind
+ * (rationale on `containmentAlpha`); both multipliers apply. Each revision
+ * is a new `configurationId` per §9.3; earlier results remain in their
+ * original run directories.
  */
 export const DEFAULT_BM25F_CONFIG: BM25FConfig = {
-  configurationId: "bm25f-v4",
+  configurationId: "bm25f-v5",
   k1: 1.2,
   b: 0.75,
   fieldWeights: {
@@ -165,14 +214,44 @@ export const DEFAULT_BM25F_CONFIG: BM25FConfig = {
   } as Partial<Record<SymbolKind, number>>,
   foldPlurals: true,
   pluralFolderRevision: 2,
-  protectIdentifierStopwords: true
+  protectIdentifierStopwords: true,
+  containmentAlpha: 0.15
 };
 
 /**
- * Configuration A, revision 3, kept selectable for A/B runs against v4.
- * Frozen: with this config `BM25FIndex` reproduces the v3 ranking
+ * Configuration A, revision 4, kept selectable for A/B runs against v5.
+ * Frozen: with this config `BM25FIndex` reproduces the v4 ranking
+ * bit-for-bit, so it must keep the pre-v5 field values (no containment
+ * prior) whatever the defaults become.
+ */
+export const BM25F_V4_CONFIG: BM25FConfig = Object.freeze({
+  configurationId: "bm25f-v4",
+  k1: 1.2,
+  b: 0.75,
+  fieldWeights: {
+    nameAndQualifiedName: 4,
+    signature: 3,
+    documentation: 2,
+    relativePath: 2,
+    normalizedSource: 1
+  },
+  stopwords: DEFAULT_STOPWORDS,
+  kindWeights: {
+    file: 0.5,
+    module: 0.5
+  } as Partial<Record<SymbolKind, number>>,
+  foldPlurals: true,
+  pluralFolderRevision: 2,
+  protectIdentifierStopwords: true,
+  containmentAlpha: null
+});
+
+/**
+ * Configuration A, revision 3, kept selectable for A/B runs against later
+ * revisions. Frozen: with this config `BM25FIndex` reproduces the v3 ranking
  * bit-for-bit, so it must keep the pre-v4 field values (folder revision 1,
- * no identifier protection) whatever the defaults become.
+ * no identifier protection, no containment prior) whatever the defaults
+ * become.
  */
 export const BM25F_V3_CONFIG: BM25FConfig = Object.freeze({
   configurationId: "bm25f-v3",
@@ -192,7 +271,8 @@ export const BM25F_V3_CONFIG: BM25FConfig = Object.freeze({
   } as Partial<Record<SymbolKind, number>>,
   foldPlurals: true,
   pluralFolderRevision: 1,
-  protectIdentifierStopwords: false
+  protectIdentifierStopwords: false,
+  containmentAlpha: null
 });
 
 export interface RetrievedCandidate {
@@ -215,6 +295,8 @@ interface IndexedDocument {
   kind: SymbolKind;
   fieldTermCounts: Record<BM25FField, Map<string, number>>;
   fieldLength: Record<BM25FField, number>;
+  /** 1 for a leaf; < 1 in proportion to how many symbols this one contains. */
+  containmentPrior: number;
 }
 
 function emptyFieldRecord<T>(fill: () => T): Record<BM25FField, T> {
@@ -242,8 +324,10 @@ export class BM25FIndex {
     // Computed once, before any tokenization: documents and queries must be
     // filtered against the same stopword set.
     this.stopwords = effectiveStopwords(symbols, config);
+    const { containmentAlpha } = config;
+    const contained = containmentAlpha === null ? null : containedCounts(symbols);
 
-    for (const symbol of symbols) {
+    for (const [position, symbol] of symbols.entries()) {
       const fieldText = extractFieldText(symbol);
       const fieldTermCounts = emptyFieldRecord<Map<string, number>>(() => new Map());
       const fieldLength = emptyFieldRecord<number>(() => 0);
@@ -262,7 +346,16 @@ export class BM25FIndex {
         this.documentFrequency.set(term, (this.documentFrequency.get(term) ?? 0) + 1);
       }
 
-      this.documents.push({ symbolId: symbol.symbolId, kind: symbol.kind, fieldTermCounts, fieldLength });
+      const containmentPrior =
+        contained === null || containmentAlpha === null ? 1 : 1 / (1 + containmentAlpha * contained[position]!);
+
+      this.documents.push({
+        symbolId: symbol.symbolId,
+        kind: symbol.kind,
+        fieldTermCounts,
+        fieldLength,
+        containmentPrior
+      });
     }
 
     // Average over documents where the field is present: most symbols have
@@ -327,7 +420,7 @@ export class BM25FIndex {
       score += idf * queryTermFrequency * ((pseudoTermFrequency * (k1 + 1)) / (k1 + pseudoTermFrequency));
     }
 
-    return score * (this.config.kindWeights[doc.kind] ?? 1);
+    return score * (this.config.kindWeights[doc.kind] ?? 1) * doc.containmentPrior;
   }
 
   /** Returns up to `topK` candidates, ranked by score descending, ties broken by ascending `symbolId` for determinism. */

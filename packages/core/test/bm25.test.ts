@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BM25F_V3_CONFIG,
+  BM25F_V4_CONFIG,
   BM25FIndex,
   DEFAULT_BM25F_CONFIG,
   DEFAULT_STOPWORDS,
@@ -112,7 +113,7 @@ describe("BM25FIndex", () => {
 
   it("exposes the configuration it was built with", () => {
     const index = new BM25FIndex(corpus, DEFAULT_BM25F_CONFIG);
-    expect(index.config.configurationId).toBe("bm25f-v4");
+    expect(index.config.configurationId).toBe("bm25f-v5");
     expect(index.documentCount).toBe(corpus.length);
   });
 
@@ -316,6 +317,127 @@ describe("BM25FIndex identifier-protected stopwords", () => {
     // "all" occurs only as prose, so it stays a stopword and carries nothing.
     expect(index.search("all", 10)).toEqual([]);
     expect(index.search("buffered", 10).length).toBe(1);
+  });
+});
+
+const COORDINATOR = "ts:src/coordinator.ts#TaskCoordinator:class";
+const RUN_NEXT = "ts:src/coordinator.ts#TaskCoordinator.runNext:method";
+
+// A container class whose normalizedSource is the union of its members' text,
+// so the queried terms repeat three times in it and once in the member that
+// implements them. No query term appears in any name or signature, isolating
+// the effect to raw term evidence in the source field.
+const containerCorpus: CodeSymbol[] = [
+  makeSymbol({
+    symbolId: COORDINATOR,
+    kind: "class",
+    name: "TaskCoordinator",
+    qualifiedName: "TaskCoordinator",
+    relativePath: "src/coordinator.ts",
+    startLine: 1,
+    endLine: 40,
+    signature: "class TaskCoordinator",
+    normalizedSource:
+      "schedule pending retry backoff schedule pending retry backoff schedule pending retry backoff"
+  }),
+  makeSymbol({
+    symbolId: RUN_NEXT,
+    kind: "method",
+    name: "runNext",
+    qualifiedName: "TaskCoordinator.runNext",
+    relativePath: "src/coordinator.ts",
+    startLine: 5,
+    endLine: 15,
+    signature: "runNext(): void",
+    normalizedSource: "schedule pending retry backoff"
+  }),
+  makeSymbol({
+    symbolId: "ts:src/coordinator.ts#TaskCoordinator.stopTimer:method",
+    kind: "method",
+    name: "stopTimer",
+    qualifiedName: "TaskCoordinator.stopTimer",
+    relativePath: "src/coordinator.ts",
+    startLine: 20,
+    endLine: 30,
+    signature: "stopTimer(): void",
+    normalizedSource: "stop timer clear handle"
+  })
+];
+
+const CONTAINMENT_QUERY = "schedule pending retry backoff";
+
+const withoutContainment = { ...DEFAULT_BM25F_CONFIG, containmentAlpha: null };
+
+describe("BM25FIndex containment prior", () => {
+  it("ranks the implementing member above the container class that repeats its terms", () => {
+    const results = new BM25FIndex(containerCorpus).search(CONTAINMENT_QUERY, 10);
+    expect(results.map((candidate) => candidate.symbolId).slice(0, 2)).toEqual([RUN_NEXT, COORDINATOR]);
+  });
+
+  it("documents the defect the prior corrects: without it the container outranks the member", () => {
+    const results = new BM25FIndex(containerCorpus, withoutContainment).search(CONTAINMENT_QUERY, 10);
+    expect(results.map((candidate) => candidate.symbolId).slice(0, 2)).toEqual([COORDINATOR, RUN_NEXT]);
+  });
+
+  it("leaves the relative order of two leaf symbols unchanged", () => {
+    // The prior is 1.0 for every leaf, so it cannot reorder leaves.
+    const query = "expire inactive session timer";
+    const leavesWith = new BM25FIndex(corpus).search(query, 10);
+    const leavesWithout = new BM25FIndex(corpus, withoutContainment).search(query, 10);
+    expect(leavesWith.map((candidate) => candidate.symbolId)).toEqual(
+      leavesWithout.map((candidate) => candidate.symbolId)
+    );
+    expect(leavesWith.map((candidate) => candidate.score)).toEqual(
+      leavesWithout.map((candidate) => candidate.score)
+    );
+  });
+
+  it("counts only the indexed symbols a container's span covers in its own file", () => {
+    // An overlapping span in a different file must confer no containment, so
+    // the outsider stays a leaf while the container counts exactly its two
+    // members. The per-document prior is recoverable as the ratio of the v5
+    // score to the same score with the prior disabled: 1 / (1 + alpha * n).
+    const OUTSIDER = "ts:src/other.ts#scheduleSweep:function";
+    const withOutsider: CodeSymbol[] = [
+      ...containerCorpus,
+      makeSymbol({
+        symbolId: OUTSIDER,
+        name: "scheduleSweep",
+        qualifiedName: "scheduleSweep",
+        relativePath: "src/other.ts",
+        startLine: 1,
+        endLine: 40,
+        normalizedSource: "schedule pending retry backoff"
+      })
+    ];
+    const withPrior = new BM25FIndex(withOutsider).search(CONTAINMENT_QUERY, 10);
+    const noPrior = new BM25FIndex(withOutsider, withoutContainment).search(CONTAINMENT_QUERY, 10);
+
+    const priorOf = (symbolId: string) => scoreOf(withPrior, symbolId) / scoreOf(noPrior, symbolId);
+    expect(priorOf(COORDINATOR)).toBeCloseTo(1 / (1 + 0.15 * 2), 12);
+    expect(priorOf(RUN_NEXT)).toBeCloseTo(1, 12);
+    expect(priorOf(OUTSIDER)).toBeCloseTo(1, 12);
+  });
+
+  it("is deterministic across repeated searches and separate indexes", () => {
+    const first = new BM25FIndex(containerCorpus);
+    const second = new BM25FIndex(containerCorpus);
+    expect(first.search(CONTAINMENT_QUERY, 10)).toEqual(first.search(CONTAINMENT_QUERY, 10));
+    expect(first.search(CONTAINMENT_QUERY, 10)).toEqual(second.search(CONTAINMENT_QUERY, 10));
+  });
+});
+
+describe("BM25F_V4_CONFIG", () => {
+  it("identifies itself as the earlier revision", () => {
+    expect(BM25F_V4_CONFIG.configurationId).toBe("bm25f-v4");
+    expect(new BM25FIndex(corpus, BM25F_V4_CONFIG).config.configurationId).toBe("bm25f-v4");
+  });
+
+  it("applies no containment prior", () => {
+    expect(BM25F_V4_CONFIG.containmentAlpha).toBeNull();
+    expect(new BM25FIndex(containerCorpus, BM25F_V4_CONFIG).search(CONTAINMENT_QUERY, 10)).toEqual(
+      new BM25FIndex(containerCorpus, withoutContainment).search(CONTAINMENT_QUERY, 10)
+    );
   });
 });
 

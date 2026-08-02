@@ -28,7 +28,7 @@ describe("retrieveCandidates — lexical retrieval, Configuration A (REQ-CORE-02
     expect(result!.candidates.map((c) => c.rank)).toEqual(
       result!.candidates.map((_, i) => i + 1)
     );
-    expect(result!.configurationId).toBe("bm25f-v4");
+    expect(result!.configurationId).toBe("bm25f-v5");
     expect(result!.repositoryCommit).toBe(COMMIT);
   });
 
