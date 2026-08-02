@@ -34,11 +34,6 @@ REQ ID, ask for one or propose a spec change first.
 - `packages/core` — @spectrace/core: the engine (schema, index, retrieval,
   ranking, links, drift). Owns all contracts.
 - `packages/cli` — @spectrace/cli: thin command surface over core.
-- `packages/prelim` — @spectrace/prelim: Phase A feasibility harness
-  (specs/spectrace-prelim-spec.md). Experiment tooling, not product code —
-  rules 2–5 do not bind it, and core/cli must never import from it. It
-  consumes @spectrace/core for indexing/retrieval (REQ-CORE-010/011/020
-  live in core), so the experiment measures the product engine.
 - `apps/studio` — Electron app (added later; consumes core, never bypasses it).
 - `specs/` — the spec vault (also the dogfood target).
 - `fixtures/` — evaluation repositories. ground-truth/ is off-limits (rule 1).
