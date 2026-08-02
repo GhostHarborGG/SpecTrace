@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BM25FIndex, DEFAULT_BM25F_CONFIG } from "../src/retrieval/bm25.js";
+import { BM25FIndex, DEFAULT_BM25F_CONFIG, DEFAULT_STOPWORDS } from "../src/retrieval/bm25.js";
 import type { CodeSymbol } from "../src/indexer/types.js";
 
 function makeSymbol(overrides: Partial<CodeSymbol> & { symbolId: string }): CodeSymbol {
@@ -106,12 +106,121 @@ describe("BM25FIndex", () => {
 
   it("exposes the configuration it was built with", () => {
     const index = new BM25FIndex(corpus, DEFAULT_BM25F_CONFIG);
-    expect(index.config.configurationId).toBe("bm25f-v1");
+    expect(index.config.configurationId).toBe("bm25f-v3");
     expect(index.documentCount).toBe(corpus.length);
   });
 
   it("handles an empty corpus without throwing", () => {
     const index = new BM25FIndex([]);
     expect(index.search("anything", 10)).toEqual([]);
+  });
+
+  it("gives no credit for stopword matches", () => {
+    const withProse: CodeSymbol[] = [
+      ...corpus,
+      makeSymbol({
+        symbolId: "ts:src/config.ts#Options:interface",
+        kind: "interface",
+        name: "Options",
+        qualifiedName: "Options",
+        relativePath: "src/config.ts",
+        normalizedSource: "the a or and is not from as such the the a"
+      })
+    ];
+    const index = new BM25FIndex(withProse);
+    const results = index.search("the session is not expired or the timer is reset", 10);
+    const ids = results.map((r) => r.symbolId);
+    expect(ids).not.toContain("ts:src/config.ts#Options:interface");
+  });
+
+  it("keeps domain-carrying words out of the default stopword list", () => {
+    for (const domainTerm of ["before", "after", "once", "call", "hook", "error", "remove"]) {
+      expect(DEFAULT_STOPWORDS).not.toContain(domainTerm);
+    }
+  });
+
+  it("lets a documented symbol earn credit from its documentation even when most of the corpus has none", () => {
+    // Two symbols identical except one documents the queried behavior; the
+    // rest of the corpus has empty documentation fields. Averaging field
+    // length over all documents would crush the documented symbol's credit.
+    const pair: CodeSymbol[] = [
+      ...corpus,
+      makeSymbol({
+        symbolId: "ts:src/queue.ts#drainQueue:function",
+        name: "drainQueue",
+        qualifiedName: "drainQueue",
+        relativePath: "src/queue.ts",
+        documentation: "Retries delivery until the pending backlog empties.",
+        normalizedSource: "function drain queue process next"
+      }),
+      makeSymbol({
+        symbolId: "ts:src/queue.ts#flushQueue:function",
+        name: "flushQueue",
+        qualifiedName: "flushQueue",
+        relativePath: "src/queue.ts",
+        documentation: "",
+        normalizedSource: "function flush queue process next"
+      })
+    ];
+    const index = new BM25FIndex(pair);
+    const results = index.search("retries delivery until the pending backlog empties", 10);
+    expect(results[0]!.symbolId).toBe("ts:src/queue.ts#drainQueue:function");
+  });
+
+  it("matches plural query terms against singular identifier terms", () => {
+    const withRemove: CodeSymbol[] = [
+      ...corpus,
+      makeSymbol({
+        symbolId: "ts:src/registry.ts#removeHandler:function",
+        name: "removeHandler",
+        qualifiedName: "removeHandler",
+        relativePath: "src/registry.ts",
+        signature: "function removeHandler(name: string): void",
+        normalizedSource: "function remove handler name delete registered handler"
+      })
+    ];
+    const index = new BM25FIndex(withRemove);
+    // "removes"/"handlers" only appear singular in the symbol's text.
+    const results = index.search("removes registered handlers", 10);
+    expect(results[0]!.symbolId).toBe("ts:src/registry.ts#removeHandler:function");
+  });
+
+  it("does not fold -ss/-us/-is endings or short tokens when folding plurals", () => {
+    const symbols: CodeSymbol[] = [
+      makeSymbol({
+        symbolId: "ts:src/a.ts#processStatus:function",
+        name: "processStatus",
+        qualifiedName: "processStatus",
+        normalizedSource: "process status class analysis"
+      })
+    ];
+    const index = new BM25FIndex(symbols);
+    // Every one of these must survive folding unchanged to match.
+    for (const q of ["process", "status", "class", "analysis"]) {
+      expect(index.search(q, 10).length, q).toBe(1);
+    }
+  });
+
+  it("ranks a member symbol above a file aggregate carrying the same text", () => {
+    const withFile: CodeSymbol[] = [
+      ...corpus,
+      makeSymbol({
+        symbolId: "ts:src/auth/session.ts#src/auth/session.ts:file",
+        kind: "file",
+        name: "session.ts",
+        qualifiedName: "src/auth/session.ts",
+        relativePath: "src/auth/session.ts",
+        normalizedSource:
+          "function expire inactive session session void check last active timestamp touch session update last active timestamp"
+      })
+    ];
+    const index = new BM25FIndex(withFile);
+    const results = index.search("expire inactive session", 10);
+    const fileRank = results.findIndex((r) => r.symbolId === "ts:src/auth/session.ts#src/auth/session.ts:file");
+    const functionRank = results.findIndex(
+      (r) => r.symbolId === "ts:src/auth/session.ts#expireInactiveSession:function"
+    );
+    expect(functionRank).toBeGreaterThanOrEqual(0);
+    expect(fileRank === -1 || functionRank < fileRank).toBe(true);
   });
 });
