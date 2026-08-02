@@ -3,6 +3,8 @@ title: Feasibility Experiment — Retrieval Error Analysis
 status: DRAFT for BP review — per-miss classification (§3) is BP-only and incomplete
 config: bm25f-v5 · commit b77477c027039362ee0ec4f39b8998c4f1b21707 · engine 0.1.0
 drafted: 2026-08-02
+updated: 2026-08-02
+evidence: runs/ through runs/bp-check/results-v5.jsonl
 ---
 
 # Retrieval Error Analysis (prelim spec §14)
@@ -15,6 +17,30 @@ as amended 2026-08-02). Section 3, the per-miss classification the spec
 requires, needs ground-truth knowledge and is **BP's to complete and own**.
 Nothing in this document asserts which candidate is correct for any
 requirement.
+
+## 0. Evidence set and reproducibility
+
+This revision reconciles every artifact currently under `runs/`. The
+comparison set is the frozen 12-requirement fixture (combined requirement
+set SHA-256 `330adba5…d3e7`) against the 49-symbol index at repository commit
+`b77477c…21707`. Every retrieval artifact contains 12 ranked lists of 10
+candidates and declares engine version `0.1.0`.
+
+| Evidence | Role in this analysis |
+|---|---|
+| `runs/hookable-index.jsonl` | Frozen 49-symbol corpus used for term-space and granularity analysis |
+| `runs/hookable-metrics.json` | Stored aggregate baseline for `bm25f-v3`; it is not the final v5 report |
+| `runs/opt/results-bm25f-v1-approx.jsonl` through `results-v7.jsonl` | Version trajectory, including the retained v6/v7 negative results |
+| `runs/opt/results-v5.jsonl` | Selected final configuration |
+| `runs/opt/results-v5-confirm.jsonl` | Deterministic confirmation |
+| `runs/bp-check/results-v5.jsonl` | BP's independent reproduction |
+
+The three v5 files are byte-for-byte identical (SHA-256
+`7eb400f2…f1384`), including ranks, symbol IDs, and floating-point scores.
+This confirms determinism across the optimization run, confirmation run,
+and BP check. Aggregate metrics below were regenerated from the saved
+retrieval artifacts under the permitted blinded procedure; no
+per-requirement evaluation output was consumed.
 
 ## 1. Headline result (bm25f-v5, n=12)
 
@@ -29,8 +55,38 @@ Hit@5 91.7%, Hit@10 100% overall: for every requirement at least one
 labeled symbol is in the top-10, and for 11 of 12 in the top-5. The
 retrieval-first premise — a local stage placing correct symbols in a short
 candidate list — holds on this fixture. The residual errors are
-concentrated at @1 (unchanged at .250 across four revisions) and in the
+concentrated at @1 (unchanged at .250 from v2 through v7) and in the
 recall mass that never enters the top-10 in the two harder strata.
+
+The headline `overall` row uses the frozen independent-only labels. The
+candidate-assisted pass-two additions change the denominator and some
+aggregate values, but not the feasibility conclusion:
+
+| Label set | R@1 | R@3 | R@5 | R@10 | H@5 | H@10 | MRR |
+|---|---|---|---|---|---|---|---|
+| independent-only (headline) | .250 | .708 | .750 | .917 | 91.7% | 100% | .515 |
+| independent + candidate review | .250 | .674 | .757 | .889 | 100% | 100% | .544 |
+
+### Version trajectory
+
+All rows below were recomputed from the corresponding saved retrieval file
+using the independent-only labels. `bm25f-v5` is the selected configuration;
+v6 and v7 remain in the record as measured failures.
+
+| Configuration | R@1 | R@3 | R@5 | R@10 | H@5 | MRR | Disposition |
+|---|---|---|---|---|---|---|---|
+| bm25f-v1-approx | .083 | .083 | .250 | .625 | 25.0% | .190 | Approximate baseline |
+| bm25f-v2 | .250 | .375 | .500 | .875 | 58.3% | .427 | Superseded |
+| bm25f-v3 | .250 | .458 | .625 | .875 | 75.0% | .443 | Stored baseline metrics |
+| bm25f-v4 | .250 | .625 | .750 | .917 | 91.7% | .499 | Shipped normalization corrections |
+| **bm25f-v5** | **.250** | **.708** | **.750** | **.917** | **91.7%** | **.515** | **Selected default** |
+| bm25f-v6 | .250 | .625 | .667 | .917 | 75.0% | .501 | Regressed; reverted |
+| bm25f-v7 | .250 | .625 | .667 | .917 | 83.3% | .501 | Regressed; reverted |
+
+The trajectory localizes the remaining problem. Corrections through v5
+substantially improved short-list coverage, while R@1 plateaued at .250
+from v2 onward. The two later ranking interventions preserved R@10 but
+moved relevant mass in the wrong direction at smaller cutoffs.
 
 ## 2. Failure mechanisms (label-free evidence)
 
@@ -98,6 +154,12 @@ future repository.
 
 ## 3. Per-miss classification — **BP to complete** (ground-truth required)
 
+No `errors.jsonl` or equivalent classification artifact is present under
+`runs/`, so this spec-required section cannot be completed from the supplied
+run directory alone without crossing the blinding wall. Completion requires
+BP to privately join the selected v5 ranks to ground truth, classify every
+miss, and add the resulting reviewed records to the reproducibility bundle.
+
 Instructions: run the evaluation privately with per-requirement output,
 then for each miss record the §14 JSON object (`requirementId`,
 `expectedSymbolIds`, `highestRelevantRank`, `category`, `explanation`,
@@ -125,8 +187,8 @@ judgment; in particular only you can distinguish *Ground-truth error* and
 
 | Candidate | Mechanism | Outcome |
 |---|---|---|
-| bm25f-v6 | source-tf saturation κ=2 (attack on M4) | Regressed: overall R@3 .708→.625, R@5 .750→.667. Reverted; id retired. |
-| bm25f-v7 | near-tie diversity reordering (attack on M4 tie bands) | Regressed: partial-overlap R@3/@5 .750→.500. Near-tied same-file siblings are often *multiple labeled symbols*; file diversity discards them. Reverted, spec clause withdrawn. |
+| bm25f-v6 | source-tf saturation κ=2 (attack on M4) | Regressed: overall R@3 .708→.625, R@5 .750→.667, H@5 91.7%→75.0%, MRR .515→.501. Reverted; id retired. |
+| bm25f-v7 | near-tie diversity reordering (attack on M4 tie bands) | Regressed: overall R@3 .708→.625, R@5 .750→.667, H@5 91.7%→83.3%, MRR .515→.501; partial-overlap R@3/@5 .750→.500. Near-tied same-file siblings are often *multiple labeled symbols*; file diversity discards them. Reverted, spec clause withdrawn. |
 | general stemming | -ing/-ed/-er/-ion suffix stripping | Rejected pre-implementation: merges `caller`→`call`, a live domain term (prelim §9.2 violation). |
 | k1 retune | k1 ∈ {3,6,8} | Rejected: same family as v6; overfitting cap reached. |
 
@@ -159,8 +221,8 @@ overfits.
 ## 6. Threats to validity (for the report's §16)
 
 - n=12 (4 per stratum): one requirement ≈ 8.3 points of recall; deltas
-  below that are noise. The v4/v5 gains exceed it; treat MRR movement as
-  directional only.
+  below that are noise. The v4 gains exceed one requirement at key cutoffs;
+  v5 adds one further @3 recovery. Treat MRR movement as directional only.
 - Optimization iterated 4 measured versions against the same fixture with
   aggregate feedback; the cap and the negative-result record bound but do
   not eliminate adaptive-overfitting risk. External check: the mechanisms
@@ -170,6 +232,10 @@ overfits.
   2026-08-02.
 - The `bm25f-v1` baseline row in the version trajectory is approximate
   (v2's length-normalization fix is structural and cannot be disabled).
-- Pass-two ground-truth additions shift metrics (independent-only vs
-  independent-plus-candidate-review rows differ); the report should state
-  which labeling pass each cited table uses.
+- Pass-two ground-truth additions shift v5 from R@3/R@5/R@10
+  .708/.750/.917 to .674/.757/.889 and MRR .515→.544. Tables must state
+  which label set they use; this document uses independent-only except
+  where explicitly shown.
+- Mechanisms M1–M5 are label-free causal hypotheses supported by corpus and
+  score behavior, not completed per-miss diagnoses. The missing BP-owned
+  classification artifact is the remaining gate on the §14 deliverable.
