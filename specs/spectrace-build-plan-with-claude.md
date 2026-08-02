@@ -86,6 +86,7 @@ Create these in the Phase A scaffold:
 - **Chat:** review retrieval results; decide merge strategy for hybrid mode (REQ-CORE-022 open item); adjust k default.
 - **Claude Code:**
   - Production REQ-CORE-010…012 (indexer, exclusions, index artifact) and REQ-CORE-020…023 (retrieval A/B, bounded candidates) + REQ-CLI-003 (`index`).
+  - Candidate (from the 2026-08-02 Phase A diagnosis, BP to approve as a REQ-CORE-010 spec change first): attach co-located markdown doc sections (README API headings) to their symbols' documentation field. On the hookable fixture this must be reported as a separate configuration line with a validity caveat — the experiment's requirements were authored from that README, so indexing it shifts what retrieval is being measured against.
   - Evaluation harness hardened: config-driven A/B runs, per-stratum reporting, chart output for the report.
   - Studio: CodeMirror 6 editor + wiki-links + backlinks (REQ-APP-002/003), frontmatter properties panel with live validation via core (REQ-APP-004) — the first real core-in-Electron integration.
 - **Gate:** Recall@k table for A and B is report-ready; Studio edits a spec file and flags a duplicate ID live.
