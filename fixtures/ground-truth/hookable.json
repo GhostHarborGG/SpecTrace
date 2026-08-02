@@ -1,7 +1,7 @@
 {
   "repositoryCommit": "b77477c027039362ee0ec4f39b8998c4f1b21707",
   "createdAt": "2026-08-01T23:00:00Z",
-  "labeler": "Brian Parker",
+  "labeler": "Brian Parker (independent); OpenAI Codex (candidate review)",
   "links": [
     {
       "requirementId": "HOOK-001",
@@ -28,6 +28,30 @@
       "rationale": "callHooks invokes the selected functions with the supplied arguments."
     },
     {
+      "requirementId": "HOOK-001",
+      "symbolId": "ts:src/hookable.ts#HookableCore.hook:method",
+      "labelPass": "candidate_review",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "Pass one focused on the full Hookable class; the exported minimal HookableCore independently registers a callback under a named hook."
+    },
+    {
+      "requirementId": "HOOK-001",
+      "symbolId": "ts:src/hookable.ts#HookableCore.callHook:method",
+      "labelPass": "candidate_review",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "Pass one focused on the full Hookable class; HookableCore.callHook selects callbacks stored under the supplied name and delegates their dispatch to callHooks."
+    },
+    {
+      "requirementId": "HOOK-001",
+      "symbolId": "ts:src/hookable.ts#Hookable.callHookWith:method",
+      "labelPass": "candidate_review",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "Pass one skipped the intermediate helper; Hookable.callHook delegates to callHookWith, which snapshots the named handler list and invokes the selected caller."
+    },
+    {
       "requirementId": "HOOK-002",
       "symbolId": "ts:src/hookable.ts#Hookable.callHook:method",
       "labelPass": "independent",
@@ -52,6 +76,14 @@
       "rationale": "Selects the serial calling strategy used for awaited invocation."
     },
     {
+      "requirementId": "HOOK-002",
+      "symbolId": "ts:src/hookable.ts#HookableCore.callHook:method",
+      "labelPass": "candidate_review",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "Pass one omitted the minimal parallel API; HookableCore.callHook invokes the shared callHooks loop, which waits on each returned thenable before advancing."
+    },
+    {
       "requirementId": "HOOK-003",
       "symbolId": "ts:src/utils.ts#callHooks:function",
       "labelPass": "independent",
@@ -74,6 +106,22 @@
       "relationship": "supports",
       "confidence": "confirmed",
       "rationale": "Supporting removal logic invoked by the returned unregister closure."
+    },
+    {
+      "requirementId": "HOOK-004",
+      "symbolId": "ts:src/hookable.ts#HookableCore.hook:method",
+      "labelPass": "candidate_review",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "The rank-3 candidate was missed because pass one focused on Hookable; HookableCore.hook returns a closure that invokes its removeHook method and clears the callback reference."
+    },
+    {
+      "requirementId": "HOOK-004",
+      "symbolId": "ts:src/hookable.ts#HookableCore.removeHook:method",
+      "labelPass": "candidate_review",
+      "relationship": "supports",
+      "confidence": "confirmed",
+      "rationale": "The parallel helper was missed with HookableCore.hook; it removes the exact callback from the named handler array when the returned disposer runs."
     },
     {
       "requirementId": "HOOK-005",
@@ -106,6 +154,14 @@
       "relationship": "implements",
       "confidence": "confirmed",
       "rationale": "Finds the supplied function in the named handler array and removes that matching entry."
+    },
+    {
+      "requirementId": "HOOK-007",
+      "symbolId": "ts:src/hookable.ts#HookableCore.removeHook:method",
+      "labelPass": "candidate_review",
+      "relationship": "implements",
+      "confidence": "confirmed",
+      "rationale": "Pass one focused on Hookable; the exported minimal HookableCore provides the same exact-function lookup and removal behavior for its named handler array."
     },
     {
       "requirementId": "HOOK-008",
