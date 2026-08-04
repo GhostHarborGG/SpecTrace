@@ -134,8 +134,18 @@ body, which is what makes a stored link survive ordinary development.
 |---|---|---|---|
 | [REQ-CORE-010](requirements/REQ-CORE-010.md) | Symbol extraction | P0 | implemented |
 | [REQ-CORE-011](requirements/REQ-CORE-011.md) | Exclusions | P0 | partial |
-| [REQ-CORE-012](requirements/REQ-CORE-012.md) | Local index artifact | P0 | proposed |
+| [REQ-CORE-012](requirements/REQ-CORE-012.md) | Local index artifact | P0 | implemented |
 <!-- spectrace:end -->
+
+**The index is a cache, not a record.** It is persisted as JSONL at
+`.spectrace/index.jsonl` — a header line naming the artifact, its version, and
+the inputs that produced it (repository commit, engine version, exclusion
+patterns), then one symbol per line. Everything in it is derived, so deleting
+it loses nothing and rebuilding at the same commit reproduces it byte for
+byte; that is what lets clients treat a stale index as a thing to discard
+rather than a thing to migrate. Reuse is therefore a pure optimization:
+`spectrace index` skips the work when the recorded inputs still match and the
+working tree is clean, and `--rebuild` bypasses the check entirely.
 
 **Phase C candidate (needs a REQ-CORE-010 spec change first, BP to approve):**
 attach co-located Markdown documentation sections — README API headings — to

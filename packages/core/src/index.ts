@@ -12,10 +12,10 @@
  *   REQ-CORE-070/071 evaluation are implemented (promoted from the Phase A
  *   feasibility harness after review). REQ-CORE-011 exclusions is partial:
  *   pattern matching holds, stale-proposal flagging waits on Phase D.
- *   REQ-CORE-001/002 schema and validation are implemented.
+ *   REQ-CORE-001/002 schema and validation, REQ-CORE-003/004 templates and
+ *   config, and REQ-CORE-012 the local index artifact are implemented.
  *   Remaining:
- *   Phase B: templates + config (REQ-CORE-003/004)
- *   Phase C: semantic/hybrid retrieval + index artifact (REQ-CORE-012, 021..023)
+ *   Phase C: semantic/hybrid retrieval + bounded candidates (REQ-CORE-021..023)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
  *   Phase F: drift                              (REQ-CORE-060..063)
  */
@@ -80,7 +80,7 @@ export {
 export { parseConfig } from "./config/parse.js";
 export { loadConfig } from "./config/load.js";
 
-// ---------- Indexing (REQ-CORE-010/011) ----------
+// ---------- Indexing (REQ-CORE-010/011/012) ----------
 
 export type { CodeSymbol, SymbolKind } from "./indexer/types.js";
 export {
@@ -91,6 +91,17 @@ export {
 } from "./indexer/typescript-indexer.js";
 export { assignSymbolIds, hashSignature, type OverloadSignature } from "./indexer/symbol-id.js";
 export { ExclusionMatcher, type ExclusionConfig } from "./indexer/exclusions.js";
+export {
+  serializeSymbolIndex,
+  parseSymbolIndex,
+  isIndexCurrent,
+  IndexArtifactFormatError,
+  SYMBOL_INDEX_ARTIFACT,
+  SYMBOL_INDEX_VERSION,
+  type SymbolIndexProvenance,
+  type SymbolIndexHeader,
+  type ParsedSymbolIndex
+} from "./indexer/index-artifact.js";
 
 // ---------- Lexical retrieval (REQ-CORE-020, Configuration A) ----------
 

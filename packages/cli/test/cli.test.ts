@@ -157,6 +157,127 @@ describe("analyze → evaluate retrieval (REQ-CLI-009 end-to-end)", () => {
   });
 });
 
+describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
+  let repo: string;
+  let indexPath: string;
+
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, "-c", "user.email=t@example.com", "-c", "user.name=Test", ...args], {
+      encoding: "utf8"
+    });
+
+  beforeAll(() => {
+    repo = mkdtempSync(path.join(tmpdir(), "spectrace-index-cmd-"));
+    indexPath = path.join(repo, ".spectrace", "index.jsonl");
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(
+      path.join(repo, "src", "math.ts"),
+      "/** Adds two numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n"
+    );
+    writeFileSync(
+      path.join(repo, "src", "shapes.ts"),
+      "export class Circle {\n" +
+        "  constructor(readonly radius: number) {}\n" +
+        "  /** Area of the circle. */\n" +
+        "  area(): number {\n    return 1;\n  }\n}\n"
+    );
+    git("init", "--quiet");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "fixture");
+  });
+
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  it("prints symbol counts by kind (AC1)", () => {
+    const { stdout, status } = run(["index", "--repo", repo]);
+    expect(status).toBe(0);
+    expect(stdout).toMatch(/^class\s+1$/m);
+    expect(stdout).toMatch(/^method\s+1$/m);
+    expect(stdout).toMatch(/^function\s+1$/m);
+    expect(stdout).toMatch(/^constructor\s+1$/m);
+    expect(stdout).toMatch(/^total\s+\d+$/m);
+  });
+
+  it("counts the `constructor` kind as a number, not Object.prototype.constructor (AC1)", () => {
+    const { countsByKind } = JSON.parse(run(["index", "--repo", repo, "--json"]).stdout);
+    expect(countsByKind.constructor).toBe(1);
+  });
+
+  it("writes a versioned, provenance-carrying artifact (REQ-CORE-012)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const header = JSON.parse(readFileSync(indexPath, "utf8").split("\n")[0]!);
+    expect(header.artifact).toBe("spectrace.symbol-index");
+    expect(header.version).toBe(1);
+    expect(header.repositoryCommit).toMatch(/^[0-9a-f]{40}$/);
+    expect(header.excludePatterns).toEqual([]);
+  });
+
+  it("rebuilds to identical bytes after the index is deleted (REQ-CORE-012 AC1)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const first = readFileSync(indexPath, "utf8");
+    rmSync(indexPath);
+    run(["index", "--repo", repo]);
+    expect(readFileSync(indexPath, "utf8")).toBe(first);
+  });
+
+  it("reuses a current index instead of re-indexing, and --rebuild discards it (AC2)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const built = readFileSync(indexPath, "utf8");
+
+    const second = JSON.parse(run(["index", "--repo", repo, "--json"]).stdout);
+    expect(second.reused).toBe(true);
+
+    // A stale index is no obstacle to --rebuild: it is discarded, not merged.
+    writeFileSync(indexPath, "not even valid jsonl\n", "utf8");
+    const rebuilt = JSON.parse(run(["index", "--repo", repo, "--rebuild", "--json"]).stdout);
+    expect(rebuilt.reused).toBe(false);
+    expect(readFileSync(indexPath, "utf8")).toBe(built);
+  });
+
+  it("re-indexes rather than reusing when the working tree is dirty", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const extra = path.join(repo, "src", "extra.ts");
+    writeFileSync(extra, "export function subtract(a: number, b: number): number {\n  return a - b;\n}\n");
+    try {
+      const result = JSON.parse(run(["index", "--repo", repo, "--json"]).stdout);
+      expect(result.reused).toBe(false);
+      expect(result.countsByKind.function).toBe(2);
+    } finally {
+      rmSync(extra);
+      run(["index", "--repo", repo, "--rebuild"]);
+    }
+  });
+
+  it("re-indexes when an exclusion pattern changes, and the exclusion removes symbols (REQ-CORE-011 AC1)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const excluded = JSON.parse(run(["index", "--repo", repo, "--exclude", "src/shapes.ts", "--json"]).stdout);
+    expect(excluded.reused).toBe(false);
+    expect(excluded.excludePatterns).toEqual(["src/shapes.ts"]);
+    expect(excluded.countsByKind.class).toBeUndefined();
+    expect(excluded.countsByKind.function).toBe(1);
+    run(["index", "--repo", repo, "--rebuild"]);
+  });
+
+  it("feeds analyze without a separate conversion step", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = path.join(repo, "reqs");
+    mkdirSync(requirements, { recursive: true });
+    writeFileSync(
+      path.join(requirements, "R-1.md"),
+      "---\nid: R-1\ntitle: Addition\nstatus: proposed\ndifficulty: high-overlap\nacceptance_criteria:\n  - Adding two numbers returns their sum.\n---\n\n## Statement\n\nThe system shall add two numbers.\n"
+    );
+    const { stdout, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--json"
+    ]);
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout).results[0].candidates.length).toBeGreaterThan(0);
+  });
+});
+
 describe("spectrace init (REQ-CLI-001)", () => {
   let tmp: string;
 

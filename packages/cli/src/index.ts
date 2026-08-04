@@ -8,33 +8,38 @@
  */
 import { Command } from "commander";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import {
   ArtifactFormatError,
   CONFIG_FILE_RELATIVE_PATH,
   CORE_VERSION,
   DEFAULT_BM25F_CONFIG,
   DuplicateSymbolIdIndexError,
+  IndexArtifactFormatError,
   TEMPLATES,
   evaluateRetrieval,
   instantiateTemplate,
+  isIndexCurrent,
   renderDefaultConfig,
   toPosixPath,
   indexRepository,
   loadConfig,
   parseRetrievalResults,
+  parseSymbolIndex,
   readRequirementDocuments,
   retrieveCandidates,
   serializeMetricsReport,
   serializeRetrievalResults,
+  serializeSymbolIndex,
   validateRequirements,
   type CandidateSet,
   type CodeSymbol,
   type GroundTruthFile,
   type MetricsArtifact,
   type RequirementDocument,
-  type RunProvenance
+  type RunProvenance,
+  type SymbolIndexProvenance
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
 
@@ -59,12 +64,9 @@ const stub = (req: string, phase: string) => () => {
   process.exitCode = 1;
 };
 
-/** Reads a JSONL symbol index (one CodeSymbol per line, as `spectrace index` writes). */
+/** Reads an index artifact written by `spectrace index` (REQ-CORE-012); headerless files still parse. */
 function readSymbols(filePath: string): CodeSymbol[] {
-  return readFileSync(filePath, "utf8")
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as CodeSymbol);
+  return parseSymbolIndex(readFileSync(filePath, "utf8")).symbols;
 }
 
 /** Envelope for `init --json`; versioned per SPEC-CLI-000 §3 AC1. */
@@ -223,65 +225,137 @@ program
     if (!report.valid) process.exitCode = 3;
   });
 
+/**
+ * True when `repo` has uncommitted changes — meaning its content no longer
+ * matches the commit an index would record, so no stored index can be
+ * assumed current. The index artifact itself is discounted: it is a build
+ * output, and in a repository that has not gitignored it yet it would
+ * otherwise report the repository dirty forever.
+ */
+function hasUncommittedChanges(repo: string, indexPath: string): boolean {
+  let porcelain: string;
+  try {
+    // -uall lists untracked files individually; the default collapses them to
+    // their directory, which would hide that the only untracked path is the
+    // index artifact we are about to discount.
+    porcelain = execFileSync("git", ["-C", repo, "status", "--porcelain", "-uall"], { encoding: "utf8" });
+  } catch {
+    // Not a git repository, or git is unavailable: never claim an index is current.
+    return true;
+  }
+  const indexRelative = toPosixPath(relative(repo, indexPath));
+  return porcelain
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .some((line) => line.slice(3).replace(/^"|"$/g, "") !== indexRelative);
+}
+
 program
   .command("index")
-  .description("Build the symbol index for a repository (REQ-CLI-003 subset)")
+  .description("Build or update the local symbol index (REQ-CLI-003)")
   .option("--repo <path>", "repository root to index", ".")
   .option("--commit <sha>", "commit SHA recorded on every symbol (default: git rev-parse HEAD in --repo)")
   .option("--out <file>", "output path for the JSONL index (default: <repo>/.spectrace/index.jsonl)")
   .option(
     "--exclude <pattern>",
-    "additional gitignore-style exclusion pattern (repeatable)",
+    "additional gitignore-style exclusion pattern (repeatable; added to config `exclude`)",
     (value, previous: string[]) => [...previous, value],
     [] as string[]
   )
+  .option("--rebuild", "discard any existing index and rebuild from scratch", false)
   .option("--json", "machine-readable output on stdout")
-  .action((opts: { repo: string; commit?: string; out?: string; exclude: string[]; json?: boolean }, cmd: Command) => {
-    const repo = resolve(opts.repo);
-    let commit = opts.commit;
-    if (!commit) {
-      try {
-        commit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-      } catch {
-        fail(
-          { error: "no_commit", message: `${repo} is not a git repository; pass --commit <sha> explicitly.` },
-          1
-        );
-        return;
+  .action(
+    (
+      opts: { repo: string; commit?: string; out?: string; exclude: string[]; rebuild: boolean; json?: boolean },
+      cmd: Command
+    ) => {
+      const repo = resolve(opts.repo);
+      let commit = opts.commit;
+      if (!commit) {
+        try {
+          commit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+        } catch {
+          fail(
+            { error: "no_commit", message: `${repo} is not a git repository; pass --commit <sha> explicitly.` },
+            1
+          );
+          return;
+        }
       }
-    }
 
-    let symbols: CodeSymbol[];
-    try {
-      ({ symbols } = indexRepository({
-        repositoryRoot: repo,
+      // Exclusions are configuration (REQ-CORE-011); --exclude adds to them.
+      const { config } = loadConfig(repo);
+      const excludePatterns = [...config.exclude, ...opts.exclude];
+      const provenance: SymbolIndexProvenance = {
         repositoryCommit: commit,
-        ...(opts.exclude.length > 0 ? { additionalExcludePatterns: opts.exclude } : {})
-      }));
-    } catch (error) {
-      if (error instanceof DuplicateSymbolIdIndexError) {
-        fail({ error: "duplicate_symbol_id", duplicates: error.duplicates }, 1);
-        return;
+        engineVersion: CORE_VERSION,
+        excludePatterns
+      };
+
+      const outPath = resolve(opts.out ?? resolve(repo, ".spectrace", "index.jsonl"));
+
+      // Update path: an index built from these same inputs, on a clean tree,
+      // is already the index this run would produce. --rebuild skips the
+      // check and rebuilds unconditionally (AC2). Per-file incremental
+      // scoping is REQ-CORE-060, Phase F.
+      let reused = false;
+      let symbols: CodeSymbol[] | undefined;
+      if (!opts.rebuild && existsSync(outPath) && !hasUncommittedChanges(repo, outPath)) {
+        try {
+          const stored = parseSymbolIndex(readFileSync(outPath, "utf8"));
+          if (isIndexCurrent(stored.provenance, provenance)) {
+            symbols = stored.symbols;
+            reused = true;
+          }
+        } catch {
+          // An unreadable or malformed index is simply rebuilt.
+        }
       }
-      throw error;
-    }
 
-    const outPath = resolve(opts.out ?? resolve(repo, ".spectrace", "index.jsonl"));
-    mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, symbols.map((s) => JSON.stringify(s)).join("\n") + (symbols.length > 0 ? "\n" : ""), "utf8");
-
-    const countsByKind: Record<string, number> = {};
-    for (const s of symbols) countsByKind[s.kind] = (countsByKind[s.kind] ?? 0) + 1;
-
-    if (cmd.optsWithGlobals().json) {
-      printJson(process.stdout, { symbolCount: symbols.length, countsByKind, repositoryCommit: commit, outputPath: outPath });
-    } else {
-      for (const [kind, count] of Object.entries(countsByKind).sort()) {
-        process.stdout.write(`${kind.padEnd(12)} ${count}\n`);
+      if (symbols === undefined) {
+        if (opts.rebuild && existsSync(outPath)) rmSync(outPath);
+        try {
+          ({ symbols } = indexRepository({
+            repositoryRoot: repo,
+            repositoryCommit: commit,
+            ...(excludePatterns.length > 0 ? { additionalExcludePatterns: excludePatterns } : {})
+          }));
+        } catch (error) {
+          if (error instanceof DuplicateSymbolIdIndexError) {
+            fail({ error: "duplicate_symbol_id", duplicates: error.duplicates }, 1);
+            return;
+          }
+          throw error;
+        }
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, serializeSymbolIndex(symbols, provenance), "utf8");
       }
-      process.stdout.write(`total        ${symbols.length}\n${outPath}\n`);
+
+      // Null-prototype: `constructor` is a real symbol kind, and on a plain
+      // object literal `countsByKind["constructor"] ?? 0` resolves to
+      // Object.prototype.constructor rather than 0.
+      const countsByKind: Record<string, number> = Object.create(null) as Record<string, number>;
+      for (const s of symbols) countsByKind[s.kind] = (countsByKind[s.kind] ?? 0) + 1;
+
+      if (cmd.optsWithGlobals().json) {
+        printJson(process.stdout, {
+          symbolCount: symbols.length,
+          countsByKind: { ...countsByKind },
+          repositoryCommit: commit,
+          excludePatterns,
+          reused,
+          outputPath: toPosixPath(outPath)
+        });
+      } else {
+        for (const [kind, count] of Object.entries(countsByKind).sort()) {
+          process.stdout.write(`${kind.padEnd(12)} ${count}\n`);
+        }
+        process.stdout.write(`total        ${symbols.length}\n`);
+        const shown = toPosixPath(outPath);
+        process.stdout.write(reused ? `${shown} (up to date, not rebuilt)\n` : `${shown}\n`);
+      }
     }
-  });
+  );
 
 program
   .command("analyze")
@@ -302,7 +376,8 @@ program
     try {
       symbols = readSymbols(resolve(opts.index));
     } catch (error) {
-      fail({ error: "unreadable_index", message: error instanceof Error ? error.message : String(error) }, 1);
+      const kind = error instanceof IndexArtifactFormatError ? "malformed_index" : "unreadable_index";
+      fail({ error: kind, message: error instanceof Error ? error.message : String(error) }, 1);
       return;
     }
     const repositoryCommit = symbols[0]?.repositoryCommit;

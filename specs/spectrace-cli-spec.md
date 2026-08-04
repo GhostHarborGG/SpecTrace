@@ -65,7 +65,7 @@ error, 3 validation failure.
 |---|---|---|---|
 | [REQ-CLI-001](requirements/REQ-CLI-001.md) | spectrace init | P0 | implemented |
 | [REQ-CLI-002](requirements/REQ-CLI-002.md) | spectrace validate | P0 | implemented |
-| [REQ-CLI-003](requirements/REQ-CLI-003.md) | spectrace index | P0 | partial |
+| [REQ-CLI-003](requirements/REQ-CLI-003.md) | spectrace index | P0 | implemented |
 | [REQ-CLI-004](requirements/REQ-CLI-004.md) | spectrace analyze | P0 | proposed |
 | [REQ-CLI-005](requirements/REQ-CLI-005.md) | spectrace review | P0 | proposed |
 | [REQ-CLI-006](requirements/REQ-CLI-006.md) | spectrace links | P0 | proposed |
@@ -83,9 +83,9 @@ addition to each command's own criteria:
 - AC3: All commands run non-interactively in CI except `review` without
   `--decide`.
 
-**Currently shipping** (`packages/cli/src/index.ts`): `init`, `validate`, and
-`evaluate retrieval` complete; `index` and `analyze` as documented subsets —
-see their requirement files for exactly what is missing and why. The remaining
+**Currently shipping** (`packages/cli/src/index.ts`): `init`, `validate`,
+`index`, and `evaluate retrieval` complete; `analyze` as a documented subset —
+see its requirement file for exactly what is missing and why. The remaining
 four commands are registered as stubs that exit 1 naming their target phase,
 so the help output matches this table at all times.
 
