@@ -8,8 +8,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IPC_CHANNELS, type VaultSummary } from "../shared/ipc.js";
-import { readVault, readVaultFile } from "./vault.js";
+import { IPC_CHANNELS, type BufferOverride, type VaultAnalysis, type VaultSummary } from "../shared/ipc.js";
+import { readVault, readVaultFile, writeVaultFile } from "./vault.js";
+import { analyzeVault } from "./analysis.js";
 
 const directory = join(fileURLToPath(import.meta.url), "..");
 
@@ -59,6 +60,16 @@ function registerHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.readFile, (_event, root: string, relativePath: string): string =>
     readVaultFile(root, relativePath)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.writeFile, (_event, root: string, relativePath: string, content: string): void => {
+    writeVaultFile(root, relativePath, content);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.analyzeVault,
+    (_event, root: string, overrides?: BufferOverride[]): VaultAnalysis =>
+      analyzeVault({ root, ...(overrides ? { overrides } : {}) })
   );
 }
 

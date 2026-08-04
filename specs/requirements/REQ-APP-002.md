@@ -2,7 +2,7 @@
 id: REQ-APP-002
 title: Markdown editing with live preview
 spec: SPEC-APP-000
-status: proposed
+status: partial
 priority: P0
 rendition: 1
 links: []
@@ -27,9 +27,22 @@ adoption bar.
 
 ## Notes
 
-Deliberately still `proposed` after the Phase 3 walking skeleton. Studio does
-render CommonMark + GFM through react-markdown, but read-only in a separate
-pane — AC2 asks for rendering *in live preview*, which this requirement
-defines as formatting rendered in place while remaining editable. No
-acceptance criterion holds until the CodeMirror editor lands (setup plan
-step 4.2).
+The CodeMirror 6 editor landed 2026-08-03 (`renderer/src/Editor.tsx`),
+replacing the read-only react-markdown pane.
+
+**AC1 holds, and holds structurally rather than by testing.** Live preview is
+implemented as CodeMirror decorations over the source text, not as a rendered
+model that is serialized back. There is only ever one representation of the
+document — the text itself — so there is no reproduction step in which a
+round-trip could lose anything. An editor that renders to a model and
+serializes back has to *reproduce* markdown, and lossless markdown
+reproduction is exactly what goes wrong in practice.
+
+**AC3 holds:** a per-pane toggle turns the decorations off, leaving the raw
+buffer.
+
+**AC2 does not hold yet.** Headings, emphasis, strikethrough, inline code,
+links, and blockquotes render in place, with their syntax marks hidden unless
+the caret is inside the construct. Tables and fenced code blocks do not — they
+remain as source text with syntax colouring. Status is `partial` until they
+render in place too.

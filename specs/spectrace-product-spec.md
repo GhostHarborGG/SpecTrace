@@ -120,9 +120,9 @@ rendered as navigable chips instead of raw YAML.
 | ID | Title | Priority | Status |
 |---|---|---|---|
 | [REQ-APP-001](requirements/REQ-APP-001.md) | Open and manage a vault | P0 | partial |
-| [REQ-APP-002](requirements/REQ-APP-002.md) | Markdown editing with live preview | P0 | proposed |
-| [REQ-APP-003](requirements/REQ-APP-003.md) | Wiki-links and backlinks | P0 | proposed |
-| [REQ-APP-004](requirements/REQ-APP-004.md) | Frontmatter-aware requirement documents | P0 | proposed |
+| [REQ-APP-002](requirements/REQ-APP-002.md) | Markdown editing with live preview | P0 | partial |
+| [REQ-APP-003](requirements/REQ-APP-003.md) | Wiki-links and backlinks | P0 | partial |
+| [REQ-APP-004](requirements/REQ-APP-004.md) | Frontmatter-aware requirement documents | P0 | partial |
 | [REQ-APP-005](requirements/REQ-APP-005.md) | Specification templates | P1 | proposed |
 <!-- spectrace:end -->
 

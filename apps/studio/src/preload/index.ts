@@ -8,7 +8,10 @@ import { IPC_CHANNELS, type Api } from "../shared/ipc.js";
 const api: Api = {
   chooseVault: () => ipcRenderer.invoke(IPC_CHANNELS.chooseVault),
   openVault: (directory) => ipcRenderer.invoke(IPC_CHANNELS.openVault, directory),
-  readFile: (root, relativePath) => ipcRenderer.invoke(IPC_CHANNELS.readFile, root, relativePath)
+  readFile: (root, relativePath) => ipcRenderer.invoke(IPC_CHANNELS.readFile, root, relativePath),
+  writeFile: (root, relativePath, content) =>
+    ipcRenderer.invoke(IPC_CHANNELS.writeFile, root, relativePath, content),
+  analyzeVault: (root, overrides) => ipcRenderer.invoke(IPC_CHANNELS.analyzeVault, root, overrides)
 };
 
 contextBridge.exposeInMainWorld("api", api);

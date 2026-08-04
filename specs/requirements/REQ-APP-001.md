@@ -29,5 +29,16 @@ ergonomics the product has no wedge.
 
 AC1 holds as of the Phase 3 walking skeleton: `apps/studio/src/main/vault.ts`
 builds the tree, with a test covering a 1,000-file vault inside the 2 s
-budget. AC2 and AC3 do not — the skeleton is read-only, with no file
-operations and no external-change watcher.
+budget.
+
+AC2 holds as of 2026-08-03 for the one operation that exists. Saving writes
+plain UTF-8 bytes with `writeFileSync` — no lock file, no sidecar, no
+database — so a vault edited in Studio is indistinguishable from one edited
+anywhere else, and `git diff` is how the user checks our work. Writes are
+confined to the vault root and to `.md` files: a bug that lets the renderer
+overwrite arbitrary files is worse than a missing feature. The statement's
+create, rename, move, and delete operations are still absent.
+
+AC3 does not hold — there is no external-change watcher, so a file edited by
+another application while the vault is open is neither detected nor reloaded,
+and a dirty buffer gets no conflict prompt. Status stays `partial`.
