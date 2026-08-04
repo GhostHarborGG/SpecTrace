@@ -170,7 +170,7 @@ same index.
 | [REQ-CORE-020](requirements/REQ-CORE-020.md) | Lexical retrieval (Configuration A) | P0 | implemented |
 | [REQ-CORE-021](requirements/REQ-CORE-021.md) | Semantic retrieval (Configuration B) | P1 | proposed |
 | [REQ-CORE-022](requirements/REQ-CORE-022.md) | Hybrid retrieval (Configuration C) | P1 | proposed |
-| [REQ-CORE-023](requirements/REQ-CORE-023.md) | Bounded candidate sets | P0 | proposed |
+| [REQ-CORE-023](requirements/REQ-CORE-023.md) | Bounded candidate sets | P0 | implemented |
 <!-- spectrace:end -->
 
 **Lexical scoring is versioned.** `bm25f-v5` is the default as of the Phase A
@@ -182,6 +182,18 @@ patches and run artifacts are retained as negative results for the evaluation
 report. The measured-version cap that stopped that optimization loop is
 methodology, recorded in `docs/feasibility-error-analysis.md`, not a
 requirement.
+
+**The bound is a gate, not a guideline.** Every payload destined for a model
+is assembled by one module (REQ-CORE-023), and that module is built so a wider
+payload is not expressible rather than merely discouraged: it never receives a
+repository path, so excerpt text can only come from already-indexed symbols;
+it resolves candidates *through* each requirement's retrieved set, so a symbol
+outside that set cannot enter a payload; and every field is length-budgeted,
+so size scales with (requirements × k) and not with any one file. The
+companion audit re-derives what a run was permitted to send and reports the
+excess, which is what makes the guarantee checkable after the fact and what
+lets a client show a reviewer exactly what would be or was sent
+(NFR-CORE-005). Ranking consumes these payloads; it does not build its own.
 
 ## 6. LLM ranking
 

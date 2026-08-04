@@ -14,8 +14,10 @@
  *   pattern matching holds, stale-proposal flagging waits on Phase D.
  *   REQ-CORE-001/002 schema and validation, REQ-CORE-003/004 templates and
  *   config, and REQ-CORE-012 the local index artifact are implemented.
+ *   REQ-CORE-023 bounded candidate sets is implemented — the gate every
+ *   model payload passes through; Phase D's ranking consumes it.
  *   Remaining:
- *   Phase C: semantic/hybrid retrieval + bounded candidates (REQ-CORE-021..023)
+ *   Phase C: semantic/hybrid retrieval          (REQ-CORE-021/022)
  *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
  *   Phase F: drift                              (REQ-CORE-060..063)
  */
@@ -122,6 +124,27 @@ export {
   type PluralFolderRevision
 } from "./retrieval/bm25.js";
 export { tokenize } from "./retrieval/tokenizer.js";
+
+// ---------- Bounded candidate sets (REQ-CORE-023) ----------
+
+export {
+  buildTransmissionUnits,
+  auditTransmissionLog,
+  serializeTransmissionLog,
+  UnresolvedCandidateError,
+  DEFAULT_EXCERPT_BUDGET,
+  TRANSMISSION_LOG_ARTIFACT,
+  TRANSMISSION_LOG_VERSION,
+  type ExcerptBudget,
+  type CandidateExcerpt,
+  type TransmissionUnit,
+  type TransmissionLog,
+  type BuildTransmissionOptions,
+  type TransmissionAudit,
+  type TransmissionViolation,
+  type TransmissionViolationRule,
+  type AuditOptions
+} from "./transmission/bounded-payload.js";
 
 // ---------- Evaluation (REQ-CORE-070/071) ----------
 

@@ -18,6 +18,10 @@ import {
   DuplicateSymbolIdIndexError,
   IndexArtifactFormatError,
   TEMPLATES,
+  TRANSMISSION_LOG_ARTIFACT,
+  TRANSMISSION_LOG_VERSION,
+  auditTransmissionLog,
+  buildTransmissionUnits,
   evaluateRetrieval,
   instantiateTemplate,
   isIndexCurrent,
@@ -32,6 +36,7 @@ import {
   serializeMetricsReport,
   serializeRetrievalResults,
   serializeSymbolIndex,
+  serializeTransmissionLog,
   validateRequirements,
   type CandidateSet,
   type CodeSymbol,
@@ -39,7 +44,9 @@ import {
   type MetricsArtifact,
   type RequirementDocument,
   type RunProvenance,
-  type SymbolIndexProvenance
+  type SymbolIndexProvenance,
+  type TransmissionAudit,
+  type TransmissionLog
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
 
@@ -359,17 +366,56 @@ program
 
 program
   .command("analyze")
-  .description("Retrieve candidates per requirement (REQ-CLI-004 subset: lexical retrieval only; ranking lands in Phase D)")
+  .description(
+    "Retrieve candidates per requirement (REQ-CLI-004 subset: lexical retrieval and the transmission bound; ranking lands in Phase D)"
+  )
   .requiredOption("--requirements <dir>", "directory of requirement .md files (prelim spec §6.3 format)")
   .requiredOption("--index <file>", "JSONL symbol index produced by `spectrace index`")
   .option("--top-k <n>", "candidates to retain per requirement", "10")
+  .option(
+    "--req <id>",
+    "restrict the run to this requirement (repeatable; absent, every requirement is analyzed)",
+    (value, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
   .option("--out <file>", "write results as a provenance-carrying JSONL artifact (REQ-CORE-071)")
+  .option(
+    "--transmission-log <file>",
+    "write exactly what would be transmitted to a model, and audit it against the bound (REQ-CORE-023)"
+  )
+  .option("--dry-run", "report what would be transmitted; performs zero model or embedding calls", false)
   .option("--json", "machine-readable output on stdout")
-  .action((opts: { requirements: string; index: string; topK: string; out?: string; json?: boolean }, cmd: Command) => {
-    const { requirements, errors } = loadRequirements(resolve(opts.requirements));
+  .action(
+    (
+      opts: {
+        requirements: string;
+        index: string;
+        topK: string;
+        req: string[];
+        out?: string;
+        transmissionLog?: string;
+        dryRun: boolean;
+        json?: boolean;
+      },
+      cmd: Command
+    ) => {
+    const loaded = loadRequirements(resolve(opts.requirements));
+    const errors = loaded.errors;
     if (errors.length > 0) {
       fail({ error: "invalid_requirements", errors }, 3);
       return;
+    }
+
+    // --req restricts the run; absent, every requirement is analyzed (AC1).
+    let requirements = loaded.requirements;
+    if (opts.req.length > 0) {
+      const wanted = new Set(opts.req);
+      const unknown = opts.req.filter((id) => !requirements.some((r) => r.id === id));
+      if (unknown.length > 0) {
+        fail({ error: "unknown_requirement", message: `No requirement document for: ${unknown.join(", ")}.` }, 2);
+        return;
+      }
+      requirements = requirements.filter((r) => wanted.has(r.id));
     }
 
     let symbols: CodeSymbol[];
@@ -412,27 +458,83 @@ program
       writeFileSync(outPath, serializeRetrievalResults(results, provenance), "utf8");
     }
 
+    // What would leave this machine, and the proof that it is bounded
+    // (REQ-CORE-023; NFR-CORE-005 "clients shall be able to reveal exactly
+    // what would be or was sent"). Nothing below performs a model or
+    // embedding call — there is no code path from here to one.
+    let transmission: { log: TransmissionLog; audit: TransmissionAudit; path?: string } | undefined;
+    if (opts.dryRun || opts.transmissionLog) {
+      const log: TransmissionLog = {
+        artifact: TRANSMISSION_LOG_ARTIFACT,
+        version: TRANSMISSION_LOG_VERSION,
+        topK,
+        repositoryCommit,
+        configurationId: provenance.configurationId,
+        engineVersion: CORE_VERSION,
+        units: buildTransmissionUnits({
+          requirementTexts: new Map(requirements.map((r) => [r.id, buildRequirementQueryText(r)])),
+          candidateSets: results,
+          symbols,
+          topK
+        })
+      };
+      const audit = auditTransmissionLog({ log, candidateSets: results });
+      transmission = { log, audit };
+      if (opts.transmissionLog) {
+        transmission.path = resolve(opts.transmissionLog);
+        mkdirSync(dirname(transmission.path), { recursive: true });
+        writeFileSync(transmission.path, serializeTransmissionLog(log), "utf8");
+      }
+    }
+
     if (cmd.optsWithGlobals().json) {
       printJson(process.stdout, {
         requirementCount: requirements.length,
         ...provenance,
-        ...(outPath ? { outputPath: outPath } : { results })
+        ...(transmission
+          ? {
+              dryRun: opts.dryRun,
+              modelCalls: 0,
+              embeddingCalls: 0,
+              transmission: {
+                excerptCount: transmission.audit.excerptCount,
+                permittedExcerptCount: transmission.audit.permittedExcerptCount,
+                bounded: transmission.audit.bounded,
+                violations: transmission.audit.violations,
+                ...(transmission.path ? { logPath: toPosixPath(transmission.path) } : {})
+              }
+            }
+          : {}),
+        ...(outPath ? { outputPath: toPosixPath(outPath) } : { results })
       });
     } else {
       process.stdout.write(
         `retrieved top-${topK} candidates for ${requirements.length} requirement(s) ` +
           `(config ${provenance.configurationId}, commit ${repositoryCommit})\n`
       );
+      if (transmission) {
+        const { audit } = transmission;
+        process.stdout.write(
+          `would transmit ${audit.excerptCount} candidate excerpt(s) across ${audit.requirementCount} ` +
+            `requirement(s); bound for this run is ${audit.permittedExcerptCount}. 0 model calls, 0 embedding calls.\n`
+        );
+        for (const violation of audit.violations) process.stdout.write(`  [${violation.rule}] ${violation.message}\n`);
+        if (transmission.path) process.stdout.write(`${toPosixPath(transmission.path)}\n`);
+      }
       if (outPath) {
-        process.stdout.write(`${outPath}\n`);
-      } else {
+        process.stdout.write(`${toPosixPath(outPath)}\n`);
+      } else if (!transmission) {
         for (const set of results) {
           const top = set.candidates[0];
           process.stdout.write(`${set.requirementId}: ${top ? `${top.symbolId} (${top.score.toFixed(3)})` : "no candidates"}\n`);
         }
       }
     }
-  });
+
+    // An unbounded payload is a validation failure, not a crash (exit 3).
+    if (transmission && !transmission.audit.bounded) process.exitCode = 3;
+  }
+  );
 
 program.command("review").description("Review queued proposals").action(stub("REQ-CLI-005", "Phase D"));
 program.command("links").description("Bidirectional trace-link queries").action(stub("REQ-CLI-006", "Phase D/E"));

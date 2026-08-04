@@ -258,6 +258,76 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     run(["index", "--repo", repo, "--rebuild"]);
   });
 
+  it("bounds a dry run to (requirements × ≤k) excerpts and calls no model (REQ-CORE-023 AC1, REQ-CLI-004 AC3)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = path.join(repo, "bounded-reqs");
+    mkdirSync(requirements, { recursive: true });
+    for (const [id, title] of [["R-1", "Addition"], ["R-2", "Area"]] as const) {
+      writeFileSync(
+        path.join(requirements, `${id}.md`),
+        `---\nid: ${id}\ntitle: ${title}\nstatus: proposed\ndifficulty: high-overlap\n` +
+          `acceptance_criteria:\n  - It works.\n---\n\n## Statement\n\nThe system shall compute the ${title.toLowerCase()}.\n`
+      );
+    }
+    const logPath = path.join(repo, "transmission.json");
+
+    const { stdout, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--dry-run",
+      "--transmission-log", logPath,
+      "--json"
+    ]);
+    expect(status).toBe(0);
+
+    const report = JSON.parse(stdout);
+    expect(report.dryRun).toBe(true);
+    expect(report.modelCalls).toBe(0);
+    expect(report.embeddingCalls).toBe(0);
+    expect(report.transmission.bounded).toBe(true);
+    expect(report.transmission.violations).toEqual([]);
+    expect(report.transmission.excerptCount).toBe(report.transmission.permittedExcerptCount);
+
+    // AC1 read literally against the written log: two requirements, at most
+    // three excerpts each, and no other content.
+    const log = JSON.parse(readFileSync(logPath, "utf8"));
+    expect(log.artifact).toBe("spectrace.transmitted-content");
+    expect(log.units).toHaveLength(2);
+    expect(log.units.map((u: { requirementId: string }) => u.requirementId).sort()).toEqual(["R-1", "R-2"]);
+    for (const unit of log.units) {
+      expect(unit.candidates.length).toBeLessThanOrEqual(3);
+    }
+    expect(log.units.reduce((n: number, u: { candidates: unknown[] }) => n + u.candidates.length, 0)).toBe(
+      report.transmission.excerptCount
+    );
+    rmSync(logPath);
+  });
+
+  it("restricts a run to --req and rejects an unknown one (REQ-CLI-004 AC1)", () => {
+    const requirements = path.join(repo, "bounded-reqs");
+    const restricted = JSON.parse(
+      run([
+        "analyze",
+        "--requirements", requirements,
+        "--index", indexPath,
+        "--req", "R-2",
+        "--dry-run",
+        "--json"
+      ]).stdout
+    );
+    expect(restricted.requirementCount).toBe(1);
+
+    const { status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--req", "R-404"
+    ]);
+    expect(status).toBe(2);
+  });
+
   it("feeds analyze without a separate conversion step", () => {
     run(["index", "--repo", repo, "--rebuild"]);
     const requirements = path.join(repo, "reqs");
