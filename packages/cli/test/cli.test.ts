@@ -162,6 +162,167 @@ describe("analyze → evaluate retrieval (REQ-CLI-009 end-to-end)", () => {
     ]);
     expect(status).toBe(1);
   });
+
+  describe("evaluate sweep — config-driven runs against one index (build plan Phase C)", () => {
+    it("runs a configuration end to end and writes report-ready artifacts", () => {
+      const outDir = path.join(tmp, "sweep");
+      const { stdout, status } = run([
+        "evaluate", "sweep",
+        "--requirements", requirementsDir,
+        "--index", indexFile,
+        "--ground-truth", groundTruthFile,
+        "--modes", "lexical",
+        "--k", "1,5",
+        "--out-dir", outDir,
+        "--json"
+      ]);
+      expect(status).toBe(0);
+
+      const report = JSON.parse(stdout);
+      expect(report.ran).toEqual(["lexical"]);
+      expect(report.skipped).toEqual([]);
+      expect(report.comparison.artifact).toBe("spectrace.metrics-comparison");
+      expect(report.comparison.ks).toEqual([1, 5]);
+
+      // Per-stratum rows survive the sweep, which is the point of it.
+      const strata = report.comparison.rows.map((r: { stratum: string }) => r.stratum);
+      expect(strata).toContain("overall");
+      expect(strata).toContain("high-overlap");
+      expect(strata).toContain("partial-overlap");
+
+      for (const file of ["results-lexical.jsonl", "metrics-lexical.json", "comparison.json", "comparison.md", "comparison.csv"]) {
+        expect(existsSync(path.join(outDir, file))).toBe(true);
+      }
+      expect(readFileSync(path.join(outDir, "comparison.md"), "utf8")).toContain("Recall@5");
+    });
+
+    it("reports a skipped configuration rather than discarding the ones that worked", () => {
+      // No API key, so semantic is skipped while lexical still produces numbers.
+      const { stdout, status } = run(
+        [
+          "evaluate", "sweep",
+          "--requirements", requirementsDir,
+          "--index", indexFile,
+          "--ground-truth", groundTruthFile,
+          "--modes", "lexical,semantic",
+          "--json"
+        ],
+        envWithoutApiKey()
+      );
+      const report = JSON.parse(stdout);
+      expect(report.ran).toEqual(["lexical"]);
+      expect(report.skipped).toHaveLength(1);
+      expect(report.skipped[0].mode).toBe("semantic");
+      expect(report.skipped[0].error).toBe("missing_api_key");
+      // Partial success is not success.
+      expect(status).toBe(1);
+    });
+
+    it("fails when no configuration could run at all", () => {
+      const { status } = run(
+        [
+          "evaluate", "sweep",
+          "--requirements", requirementsDir,
+          "--index", indexFile,
+          "--ground-truth", groundTruthFile,
+          "--modes", "semantic"
+        ],
+        envWithoutApiKey()
+      );
+      expect(status).toBe(1);
+    });
+
+    it("rejects an unknown mode and an unknown format", () => {
+      const base = [
+        "evaluate", "sweep",
+        "--requirements", requirementsDir,
+        "--index", indexFile,
+        "--ground-truth", groundTruthFile
+      ];
+      expect(run([...base, "--modes", "telepathy"]).status).toBe(2);
+      expect(run([...base, "--modes", "lexical", "--format", "interpretive-dance"]).status).toBe(2);
+    });
+  });
+
+  describe("evaluate compare — cross-configuration tables", () => {
+    let metricsA: string;
+    let metricsB: string;
+
+    beforeAll(() => {
+      metricsA = path.join(tmp, "metrics-a.json");
+      metricsB = path.join(tmp, "metrics-b.json");
+      // Two evaluations of the same run at different k, so the comparison has
+      // something real to align.
+      run([
+        "analyze", "--requirements", requirementsDir, "--index", indexFile,
+        "--top-k", "5", "--out", path.join(tmp, "cmp-results.jsonl")
+      ]);
+      for (const [out, k] of [[metricsA, "1,5"], [metricsB, "1,5"]] as const) {
+        run([
+          "evaluate", "retrieval",
+          "--results", path.join(tmp, "cmp-results.jsonl"),
+          "--ground-truth", groundTruthFile,
+          "--requirements", requirementsDir,
+          "--k", k,
+          "--out", out
+        ]);
+      }
+    });
+
+    it("renders a markdown table naming both configurations", () => {
+      const { stdout, status } = run([
+        "evaluate", "compare",
+        "--metrics", metricsA,
+        "--metrics", metricsB,
+        "--label", "A",
+        "--label", "B",
+        "--format", "markdown"
+      ]);
+      expect(status).toBe(0);
+      expect(stdout).toContain("| A |");
+      expect(stdout).toContain("| B |");
+      expect(stdout).toContain("Recall@5");
+      expect(stdout).toContain("overall");
+    });
+
+    it("renders CSV with one row per stratum and configuration", () => {
+      const { stdout } = run([
+        "evaluate", "compare",
+        "--metrics", metricsA, "--metrics", metricsB,
+        "--label", "A", "--label", "B",
+        "--format", "csv"
+      ]);
+      const [header, ...rows] = stdout.trim().split("\n");
+      expect(header).toContain("recall_at_5");
+      expect(rows.filter((r) => r.startsWith("overall,"))).toHaveLength(2);
+    });
+
+    it("emits the comparison artifact under --json and --out", () => {
+      const outFile = path.join(tmp, "comparison.json");
+      const { stdout } = run([
+        "evaluate", "compare",
+        "--metrics", metricsA, "--metrics", metricsB,
+        "--label", "A", "--label", "B",
+        "--out", outFile, "--json"
+      ]);
+      expect(JSON.parse(stdout).artifact).toBe("spectrace.metrics-comparison");
+      expect(JSON.parse(readFileSync(outFile, "utf8")).configurations).toHaveLength(2);
+    });
+
+    it("rejects a label count that does not match the metrics files", () => {
+      const { status } = run([
+        "evaluate", "compare",
+        "--metrics", metricsA, "--metrics", metricsB,
+        "--label", "only-one"
+      ]);
+      expect(status).toBe(2);
+    });
+
+    it("exits 1 on a file that is not a metrics artifact", () => {
+      const { status } = run(["evaluate", "compare", "--metrics", groundTruthFile]);
+      expect(status).toBe(1);
+    });
+  });
 });
 
 describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {

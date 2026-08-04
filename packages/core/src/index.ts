@@ -202,6 +202,19 @@ export {
   type RetrievalMetricsReport
 } from "./evaluation/retrieval-metrics.js";
 export {
+  compareMetricsReports,
+  serializeMetricsComparison,
+  ComparisonError,
+  METRICS_COMPARISON_ARTIFACT,
+  METRICS_COMPARISON_VERSION,
+  type ConfigurationRun,
+  type ComparisonCell,
+  type ComparisonRow,
+  type MetricsComparison,
+  type ComparisonOmission,
+  type ComparisonOmissionRule
+} from "./evaluation/comparison.js";
+export {
   serializeRetrievalResults,
   parseRetrievalResults,
   serializeMetricsReport,

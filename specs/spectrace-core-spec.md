@@ -183,6 +183,16 @@ report. The measured-version cap that stopped that optimization loop is
 methodology, recorded in `docs/feasibility-error-analysis.md`, not a
 requirement.
 
+**Comparing configurations is a first-class operation.** A single
+configuration's Recall@k in isolation decides nothing — the Phase C gate asks
+which configuration did better and where — so aligning several metrics
+reports into one table is part of the engine, not a reporting afterthought.
+The alignment carries what it had to drop: reports computed over different k
+values or different strata are the normal case, and a table that silently
+intersects them and presents the remainder reads as "we measured everything"
+when it did not. Rendering that table — Markdown, CSV, terminal — belongs to
+the clients.
+
 **Hybrid ships two merge strategies, not one.** Resolved 2026-08-03 (BP):
 `rrf-v1` (reciprocal rank fusion) and `weighted-v1` (normalized α-weighted
 sum) both ship behind one versioned registry, both run on the frozen corpus,

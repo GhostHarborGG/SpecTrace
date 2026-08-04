@@ -28,3 +28,33 @@ this command as well.
 
 Passing a ground-truth path to this command is explicitly permitted under
 CLAUDE.md rule 1; reading back anything beyond aggregate metrics is not.
+
+## Proposed amendment — awaiting BP
+
+Two subcommands were added on 2026-08-03 to serve the Phase C gate
+("Recall@k table for A and B is report-ready"):
+
+- `evaluate compare --metrics <file>… [--label <name>…] [--format
+  markdown|csv|text]` — aligns metrics artifacts across configurations into
+  one table. Pure computation over already-computed metrics; no network.
+- `evaluate sweep --requirements <dir> --index <file> --ground-truth <file>
+  [--modes lexical,semantic,hybrid]` — runs each configuration against one
+  index, evaluates each, and writes results, metrics, and comparison
+  artifacts. Turns a seven-command evaluation into one.
+
+**This collides with AC2.** `sweep` runs retrieval, so in `semantic` or
+`hybrid` mode it reaches the network; AC2 as written says "the command
+requires no network access."
+
+The statement's own wording scopes every clause to
+`spectrace evaluate retrieval` — the network-free guarantee is about metric
+*computation*, which remains true: nothing in the metrics path, in `compare`,
+or in a `sweep` restricted to `--modes lexical` opens a socket. **Recommended
+amendment: scope AC2 explicitly to `evaluate retrieval` and to metric
+computation, and name the two subcommands in the statement.** BP's call; the
+ACs are deliberately left unedited until then, and all three still hold for
+`evaluate retrieval` as specified, so the status stands.
+
+A partial sweep exits 1 and names what it skipped rather than reporting
+success over a subset — the same reasoning as the comparison's `omitted`
+list.

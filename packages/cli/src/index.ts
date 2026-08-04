@@ -14,15 +14,13 @@ import {
   ArtifactFormatError,
   CONFIG_FILE_RELATIVE_PATH,
   CORE_VERSION,
-  DEFAULT_BM25F_CONFIG,
   DEFAULT_MERGE_STRATEGY,
   DEFAULT_RRF_K,
   DEFAULT_ALPHA,
   DuplicateSymbolIdIndexError,
   MERGE_STRATEGY_IDS,
-  mergeCandidateSets,
-  mergePoolSize,
-  EmbeddingCache,
+  compareMetricsReports,
+  serializeMetricsComparison,
   IndexArtifactFormatError,
   TEMPLATES,
   TRANSMISSION_LOG_ARTIFACT,
@@ -39,9 +37,6 @@ import {
   parseRetrievalResults,
   parseSymbolIndex,
   readRequirementDocuments,
-  retrieveCandidates,
-  retrieveSemanticCandidates,
-  serializeEmbeddingCache,
   serializeMetricsReport,
   serializeRetrievalResults,
   serializeSymbolIndex,
@@ -49,7 +44,9 @@ import {
   validateRequirements,
   type CandidateSet,
   type CodeSymbol,
+  type ConfigurationRun,
   type GroundTruthFile,
+  type RetrievalMode,
   type MergeConfig,
   type MergeStrategyId,
   type MetricsArtifact,
@@ -60,7 +57,9 @@ import {
   type TransmissionLog
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
-import { DEFAULT_EMBEDDING_MODEL, createOpenAIEmbeddingProvider } from "./embedding-provider.js";
+import { DEFAULT_EMBEDDING_MODEL } from "./embedding-provider.js";
+import { runRetrieval } from "./retrieval-run.js";
+import { COMPARISON_FORMATS, renderComparison, type ComparisonFormat } from "./comparison-format.js";
 
 const program = new Command();
 
@@ -515,110 +514,51 @@ program
       ...(alpha.value === undefined ? {} : { alpha: alpha.value })
     };
 
-    const queries = requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) }));
-    // Hybrid retrieves a wider pool per configuration, then merges down to
-    // topK — a merge of two k-truncated lists has little to work with.
-    const retrievalK = mode === "hybrid" ? mergePoolSize(topK) : topK;
-
-    let embeddingReport: { embedded: number; cached: number; cachePath?: string } | undefined;
-
-    /** Configuration B. Constructs the provider here because core never may (CLAUDE.md rule 2). */
-    const runSemantic = async (): Promise<CandidateSet[] | undefined> => {
-      const apiKey = process.env["OPENAI_API_KEY"];
-      if (!apiKey) {
+    let dimensions: number | undefined;
+    if (opts.embeddingDimensions !== undefined) {
+      dimensions = Number.parseInt(opts.embeddingDimensions, 10);
+      if (!Number.isInteger(dimensions) || dimensions <= 0) {
         fail(
           {
-            error: "missing_api_key",
-            message: `Set OPENAI_API_KEY to run retrieval mode "${mode}" (REQ-CORE-021).`
+            error: "invalid_embedding_dimensions",
+            message: `--embedding-dimensions must be a positive integer; got ${opts.embeddingDimensions}.`
           },
           2
         );
-        return undefined;
+        return;
       }
-
-      let dimensions: number | undefined;
-      if (opts.embeddingDimensions !== undefined) {
-        dimensions = Number.parseInt(opts.embeddingDimensions, 10);
-        if (!Number.isInteger(dimensions) || dimensions <= 0) {
-          fail(
-            {
-              error: "invalid_embedding_dimensions",
-              message: `--embedding-dimensions must be a positive integer; got ${opts.embeddingDimensions}.`
-            },
-            2
-          );
-          return undefined;
-        }
-      }
-
-      const model = opts.embeddingModel ?? config.model.embedding ?? undefined;
-      let provider;
-      try {
-        provider = createOpenAIEmbeddingProvider({
-          apiKey,
-          ...(model ? { model } : {}),
-          ...(dimensions === undefined ? {} : { dimensions })
-        });
-      } catch (error) {
-        fail(
-          { error: "invalid_embedding_config", message: error instanceof Error ? error.message : String(error) },
-          2
-        );
-        return undefined;
-      }
-
-      const cachePath = opts.embeddingCache ? resolve(opts.embeddingCache) : undefined;
-      let cache: EmbeddingCache | undefined;
-      if (cachePath && existsSync(cachePath)) {
-        try {
-          cache = EmbeddingCache.parse(readFileSync(cachePath, "utf8"), provider.modelId, provider.dimensions);
-        } catch {
-          // A corrupt cache costs API calls, not correctness — rebuild it.
-          cache = undefined;
-        }
-      }
-
-      let semantic;
-      try {
-        semantic = await retrieveSemanticCandidates({
-          queries,
-          symbols,
-          topK: retrievalK,
-          repositoryCommit,
-          provider,
-          ...(cache ? { cache } : {})
-        });
-      } catch (error) {
-        fail({ error: "embedding_failed", message: error instanceof Error ? error.message : String(error) }, 1);
-        return undefined;
-      }
-
-      embeddingReport = { embedded: semantic.embeddedCount, cached: semantic.cachedCount };
-      if (cachePath) {
-        mkdirSync(dirname(cachePath), { recursive: true });
-        writeFileSync(cachePath, serializeEmbeddingCache(semantic.cache.toFile()), "utf8");
-        embeddingReport.cachePath = toPosixPath(cachePath);
-      }
-      return semantic.results;
-    };
-
-    const runLexical = () =>
-      retrieveCandidates({ queries, symbols, topK: retrievalK, repositoryCommit });
-
-    let results: CandidateSet[];
-    if (mode === "lexical") {
-      results = runLexical();
-    } else if (mode === "semantic") {
-      const semantic = await runSemantic();
-      if (semantic === undefined) return;
-      results = semantic;
-    } else {
-      const semantic = await runSemantic();
-      if (semantic === undefined) return;
-      results = mergeCandidateSets({ lexical: runLexical(), semantic, topK, config: mergeConfig });
     }
 
-    const configurationId = results[0]?.configurationId ?? DEFAULT_BM25F_CONFIG.configurationId;
+    const queries = requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) }));
+
+    // One dispatch, shared with `evaluate sweep`, so the numbers a sweep
+    // reports always describe what this command does.
+    const run = await runRetrieval({
+      queries,
+      symbols,
+      repositoryCommit,
+      mode,
+      topK,
+      merge: mergeConfig,
+      embedding: {
+        apiKey: process.env["OPENAI_API_KEY"],
+        model: opts.embeddingModel ?? config.model.embedding ?? undefined,
+        dimensions,
+        cachePath: opts.embeddingCache ? resolve(opts.embeddingCache) : undefined
+      }
+    });
+    if (!run.ok) {
+      fail({ error: run.error, message: run.message }, run.exitCode);
+      return;
+    }
+
+    const { results, configurationId } = run;
+    const embeddingReport = run.embeddings
+      ? {
+          ...run.embeddings,
+          ...(run.embeddings.cachePath ? { cachePath: toPosixPath(run.embeddings.cachePath) } : {})
+        }
+      : undefined;
 
     const provenance: RunProvenance = {
       repositoryCommit,
@@ -810,6 +750,319 @@ evaluate
       } else {
         process.stdout.write(formatMetricsHuman(JSON.parse(serialized) as MetricsArtifact));
       }
+    }
+  );
+
+/** Reads a metrics artifact written by `evaluate retrieval --out`. */
+function readMetricsArtifact(filePath: string): MetricsArtifact {
+  const parsed = JSON.parse(readFileSync(filePath, "utf8")) as MetricsArtifact;
+  if (parsed?.artifact !== "spectrace.retrieval-metrics" || typeof parsed.report !== "object") {
+    throw new Error(`${filePath} is not a spectrace.retrieval-metrics artifact.`);
+  }
+  return parsed;
+}
+
+evaluate
+  .command("compare")
+  .description("Compare metrics artifacts across retrieval configurations, report-ready")
+  .requiredOption(
+    "--metrics <file>",
+    "metrics artifact from `evaluate retrieval --out` (repeatable, one per configuration)",
+    (value, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
+  .option(
+    "--label <name>",
+    "column heading for the corresponding --metrics, in order (default: the configuration ID)",
+    (value, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
+  .option("--format <fmt>", `output format: ${COMPARISON_FORMATS.join(" | ")}`, "text")
+  .option("--out <file>", "also write the comparison as a JSON artifact")
+  .option("--json", "machine-readable output on stdout")
+  .action(
+    (
+      opts: { metrics: string[]; label: string[]; format: string; out?: string; json?: boolean },
+      cmd: Command
+    ) => {
+      if (!COMPARISON_FORMATS.includes(opts.format as ComparisonFormat)) {
+        fail(
+          { error: "invalid_format", message: `--format must be one of ${COMPARISON_FORMATS.join(", ")}.` },
+          2
+        );
+        return;
+      }
+      if (opts.label.length > 0 && opts.label.length !== opts.metrics.length) {
+        fail(
+          {
+            error: "label_mismatch",
+            message: `Got ${opts.label.length} --label value(s) for ${opts.metrics.length} --metrics file(s); supply one each or none.`
+          },
+          2
+        );
+        return;
+      }
+
+      const runs: ConfigurationRun[] = [];
+      for (const [i, file] of opts.metrics.entries()) {
+        let artifact: MetricsArtifact;
+        try {
+          artifact = readMetricsArtifact(resolve(file));
+        } catch (error) {
+          fail(
+            { error: "unreadable_metrics", message: error instanceof Error ? error.message : String(error) },
+            1
+          );
+          return;
+        }
+        runs.push({
+          configurationId: artifact.provenance?.configurationId ?? `unknown-${i + 1}`,
+          ...(opts.label[i] ? { label: opts.label[i]! } : {}),
+          report: artifact.report
+        });
+      }
+
+      let comparison;
+      try {
+        comparison = compareMetricsReports(runs);
+      } catch (error) {
+        fail(
+          { error: "incomparable", message: error instanceof Error ? error.message : String(error) },
+          2
+        );
+        return;
+      }
+
+      if (opts.out) {
+        const outPath = resolve(opts.out);
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, serializeMetricsComparison(comparison), "utf8");
+      }
+
+      if (cmd.optsWithGlobals().json) {
+        process.stdout.write(serializeMetricsComparison(comparison));
+      } else {
+        process.stdout.write(renderComparison(comparison, opts.format as ComparisonFormat));
+      }
+    }
+  );
+
+evaluate
+  .command("sweep")
+  .description("Run several retrieval configurations against one index and compare them (build plan Phase C)")
+  .requiredOption("--requirements <dir>", "directory of requirement .md files")
+  .requiredOption("--index <file>", "symbol index produced by `spectrace index`")
+  .requiredOption("--ground-truth <file>", "hand-labeled ground-truth.json")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml", ".")
+  .option("--modes <list>", "comma-separated retrieval modes to run", "lexical,semantic,hybrid")
+  .option("--top-k <n>", "candidates per requirement (default: config retrieval.topK)")
+  .option("--k <list>", "comma-separated metric k values (default 1,3,5,10)")
+  .option("--out-dir <dir>", "write per-configuration results and metrics artifacts here")
+  .option("--format <fmt>", `comparison format: ${COMPARISON_FORMATS.join(" | ")}`, "text")
+  .option("--embedding-model <id>", "embedding model (default: config model.embedding)")
+  .option("--embedding-cache <file>", "shared embedding cache across configurations (REQ-CORE-021)")
+  .option("--merge-strategy <id>", `hybrid merge strategy (default ${DEFAULT_MERGE_STRATEGY})`)
+  .option("--json", "machine-readable output on stdout")
+  .action(
+    async (
+      opts: {
+        requirements: string;
+        index: string;
+        groundTruth: string;
+        repo: string;
+        modes: string;
+        topK?: string;
+        k?: string;
+        outDir?: string;
+        format: string;
+        embeddingModel?: string;
+        embeddingCache?: string;
+        mergeStrategy?: string;
+        json?: boolean;
+      },
+      cmd: Command
+    ) => {
+      if (!COMPARISON_FORMATS.includes(opts.format as ComparisonFormat)) {
+        fail({ error: "invalid_format", message: `--format must be one of ${COMPARISON_FORMATS.join(", ")}.` }, 2);
+        return;
+      }
+
+      const modes = opts.modes.split(",").map((m) => m.trim()).filter((m) => m.length > 0);
+      const invalid = modes.filter((m) => m !== "lexical" && m !== "semantic" && m !== "hybrid");
+      if (modes.length === 0 || invalid.length > 0) {
+        fail(
+          { error: "invalid_mode", message: `--modes must list lexical, semantic, or hybrid; got ${opts.modes}.` },
+          2
+        );
+        return;
+      }
+
+      let ks: number[] | undefined;
+      if (opts.k) {
+        ks = opts.k.split(",").map((v) => Number.parseInt(v.trim(), 10));
+        if (ks.some((k) => !Number.isInteger(k) || k <= 0)) {
+          fail({ error: "invalid_k", message: `--k must be comma-separated positive integers; got ${opts.k}.` }, 2);
+          return;
+        }
+      }
+
+      const { requirements, errors } = loadRequirements(resolve(opts.requirements));
+      if (errors.length > 0) {
+        fail({ error: "invalid_requirements", errors }, 3);
+        return;
+      }
+
+      let symbols: CodeSymbol[];
+      try {
+        symbols = readSymbols(resolve(opts.index));
+      } catch (error) {
+        const kind = error instanceof IndexArtifactFormatError ? "malformed_index" : "unreadable_index";
+        fail({ error: kind, message: error instanceof Error ? error.message : String(error) }, 1);
+        return;
+      }
+      const repositoryCommit = symbols[0]?.repositoryCommit;
+      if (repositoryCommit === undefined) {
+        fail({ error: "empty_index", message: "Index file has no symbols." }, 1);
+        return;
+      }
+
+      // The ground-truth path is passed straight through to the metrics
+      // computation; nothing in this command reads a label.
+      let groundTruthRaw: unknown;
+      try {
+        groundTruthRaw = JSON.parse(readFileSync(resolve(opts.groundTruth), "utf8"));
+      } catch (error) {
+        fail(
+          { error: "unreadable_ground_truth", message: error instanceof Error ? error.message : String(error) },
+          1
+        );
+        return;
+      }
+      if (
+        typeof groundTruthRaw !== "object" ||
+        groundTruthRaw === null ||
+        !Array.isArray((groundTruthRaw as { links?: unknown }).links)
+      ) {
+        fail(
+          { error: "malformed_ground_truth", message: "Ground-truth file must be a JSON object with a `links` array." },
+          1
+        );
+        return;
+      }
+
+      const { config } = loadConfig(resolve(opts.repo));
+      const topK = opts.topK === undefined ? config.retrieval.topK : Number.parseInt(opts.topK, 10);
+      if (!Number.isInteger(topK) || topK <= 0) {
+        fail({ error: "invalid_top_k", message: `--top-k must be a positive integer; got ${opts.topK}.` }, 2);
+        return;
+      }
+
+      const queries = requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) }));
+      const evaluationRequirements = requirements.map((r) => ({ id: r.id, difficulty: r.difficulty }));
+      const outDir = opts.outDir ? resolve(opts.outDir) : undefined;
+      if (outDir) mkdirSync(outDir, { recursive: true });
+
+      const runs: ConfigurationRun[] = [];
+      const skipped: { mode: string; error: string; message: string }[] = [];
+      let totalEmbedded = 0;
+
+      // The cache is shared across configurations on purpose: B and C embed
+      // the same symbols, so C costs nothing extra once B has run.
+      const cachePath = opts.embeddingCache ? resolve(opts.embeddingCache) : undefined;
+
+      for (const mode of modes as RetrievalMode[]) {
+        const run = await runRetrieval({
+          queries,
+          symbols,
+          repositoryCommit,
+          mode,
+          topK,
+          ...(opts.mergeStrategy ? { merge: { strategy: opts.mergeStrategy as MergeStrategyId } } : {}),
+          embedding: {
+            apiKey: process.env["OPENAI_API_KEY"],
+            model: opts.embeddingModel ?? config.model.embedding ?? undefined,
+            cachePath
+          }
+        });
+
+        if (!run.ok) {
+          // One configuration failing must not discard the ones that worked;
+          // the skip is reported rather than swallowed.
+          skipped.push({ mode, error: run.error, message: run.message });
+          continue;
+        }
+        totalEmbedded += run.embeddings?.embedded ?? 0;
+
+        const report = evaluateRetrieval({
+          results: run.results,
+          groundTruth: groundTruthRaw as GroundTruthFile,
+          requirements: evaluationRequirements,
+          ...(ks ? { ks } : {})
+        });
+
+        const provenance: RunProvenance = {
+          repositoryCommit,
+          configurationId: run.configurationId,
+          engineVersion: CORE_VERSION
+        };
+
+        if (outDir) {
+          writeFileSync(
+            resolve(outDir, `results-${mode}.jsonl`),
+            serializeRetrievalResults(run.results, provenance),
+            "utf8"
+          );
+          writeFileSync(
+            resolve(outDir, `metrics-${mode}.json`),
+            serializeMetricsReport(report, provenance),
+            "utf8"
+          );
+        }
+
+        runs.push({ configurationId: run.configurationId, label: mode, report });
+      }
+
+      if (runs.length === 0) {
+        fail(
+          {
+            error: "no_configuration_ran",
+            message: `Every requested configuration failed: ${skipped.map((s) => `${s.mode} (${s.message})`).join("; ")}`
+          },
+          1
+        );
+        return;
+      }
+
+      const comparison = compareMetricsReports(runs);
+      if (outDir) {
+        writeFileSync(resolve(outDir, "comparison.json"), serializeMetricsComparison(comparison), "utf8");
+        writeFileSync(
+          resolve(outDir, "comparison.md"),
+          renderComparison(comparison, "markdown"),
+          "utf8"
+        );
+        writeFileSync(resolve(outDir, "comparison.csv"), renderComparison(comparison, "csv"), "utf8");
+      }
+
+      if (cmd.optsWithGlobals().json) {
+        printJson(process.stdout, {
+          ran: runs.map((r) => r.label),
+          skipped,
+          embeddedTexts: totalEmbedded,
+          ...(outDir ? { outputDirectory: toPosixPath(outDir) } : {}),
+          comparison
+        });
+      } else {
+        process.stdout.write(renderComparison(comparison, opts.format as ComparisonFormat));
+        for (const skip of skipped) {
+          process.stdout.write(`skipped ${skip.mode}: ${skip.message}\n`);
+        }
+        if (outDir) process.stdout.write(`${toPosixPath(outDir)}\n`);
+      }
+
+      // A partial sweep succeeded at what it could; say so with exit 0 only
+      // when nothing was skipped.
+      if (skipped.length > 0) process.exitCode = 1;
     }
   );
 
