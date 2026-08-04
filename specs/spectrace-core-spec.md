@@ -168,7 +168,7 @@ same index.
 | ID | Title | Priority | Status |
 |---|---|---|---|
 | [REQ-CORE-020](requirements/REQ-CORE-020.md) | Lexical retrieval (Configuration A) | P0 | implemented |
-| [REQ-CORE-021](requirements/REQ-CORE-021.md) | Semantic retrieval (Configuration B) | P1 | proposed |
+| [REQ-CORE-021](requirements/REQ-CORE-021.md) | Semantic retrieval (Configuration B) | P1 | implemented |
 | [REQ-CORE-022](requirements/REQ-CORE-022.md) | Hybrid retrieval (Configuration C) | P1 | proposed |
 | [REQ-CORE-023](requirements/REQ-CORE-023.md) | Bounded candidate sets | P0 | implemented |
 <!-- spectrace:end -->
@@ -182,6 +182,19 @@ patches and run artifacts are retained as negative results for the evaluation
 report. The measured-version cap that stopped that optimization loop is
 methodology, recorded in `docs/feasibility-error-analysis.md`, not a
 requirement.
+
+**The engine embeds nothing itself.** Configuration B declares an
+`EmbeddingProvider` interface and requires the client to supply one — the CLI
+adapts OpenAI `text-embedding-3` (decided 2026-08-03, BP), Studio will adapt
+whatever it is configured with, and neither the endpoint nor the key is ever
+visible to core. That follows from the no-environment-variables rule rather
+than being a separate decision, and it has a useful side effect: the cache
+requirement becomes testable without a network, because a provider that
+counts its own calls proves "zero API calls on the second run" directly.
+Vectors are cached by a hash of the embedded text rather than by symbol ID,
+which is what makes invalidation per symbol on content change fall out
+automatically — a symbol keeps its ID across edits to its body, so a
+symbol-keyed cache would serve a vector for text that no longer exists.
 
 **The bound is a gate, not a guideline.** Every payload destined for a model
 is assembled by one module (REQ-CORE-023), and that module is built so a wider

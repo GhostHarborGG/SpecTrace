@@ -7,17 +7,24 @@ import path from "node:path";
 
 const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "index.ts");
 
-function run(args: string[]): { stdout: string; status: number } {
+function run(args: string[], env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
   try {
     const stdout = execFileSync("npx", ["tsx", entry, ...args], {
       encoding: "utf8",
-      shell: process.platform === "win32"
+      shell: process.platform === "win32",
+      ...(env ? { env } : {})
     });
-    return { stdout, status: 0 };
+    return { stdout, stderr: "", status: 0 };
   } catch (error) {
-    const e = error as { status?: number; stdout?: string };
-    return { stdout: e.stdout ?? "", status: e.status ?? -1 };
+    const e = error as { status?: number; stdout?: string; stderr?: string };
+    return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", status: e.status ?? -1 };
   }
+}
+
+/** The ambient environment without an OpenAI key, so key-absence paths are testable on any machine. */
+function envWithoutApiKey(): NodeJS.ProcessEnv {
+  const { OPENAI_API_KEY: _omitted, ...rest } = process.env;
+  return rest;
 }
 
 describe("cli surface", () => {
@@ -326,6 +333,39 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
       "--req", "R-404"
     ]);
     expect(status).toBe(2);
+  });
+
+  it("names the missing key rather than failing mid-run in semantic mode (REQ-CORE-021)", () => {
+    const { stderr, status } = run(
+      [
+        "analyze",
+        "--requirements", path.join(repo, "bounded-reqs"),
+        "--index", indexPath,
+        "--mode", "semantic"
+      ],
+      envWithoutApiKey()
+    );
+    expect(status).toBe(2);
+    expect(stderr).toContain("OPENAI_API_KEY");
+  });
+
+  it("rejects an unimplemented mode by name (REQ-CORE-022 lands next)", () => {
+    const hybrid = run([
+      "analyze",
+      "--requirements", path.join(repo, "bounded-reqs"),
+      "--index", indexPath,
+      "--mode", "hybrid"
+    ]);
+    expect(hybrid.status).toBe(2);
+    expect(hybrid.stderr).toContain("REQ-CORE-022");
+
+    const nonsense = run([
+      "analyze",
+      "--requirements", path.join(repo, "bounded-reqs"),
+      "--index", indexPath,
+      "--mode", "telepathy"
+    ]);
+    expect(nonsense.status).toBe(2);
   });
 
   it("feeds analyze without a separate conversion step", () => {

@@ -2,7 +2,7 @@
 id: REQ-CORE-021
 title: Semantic retrieval (Configuration B)
 spec: SPEC-CORE-000
-status: proposed
+status: implemented
 priority: P1
 links: []
 acceptance_criteria:
@@ -35,3 +35,29 @@ Cache invalidation is per symbol on content change, which the index already
 gives us — a symbol's identity is declaration-based (REQ-CORE-010) while its
 `normalizedSource` is content, so hashing the embedded text is what decides
 whether a cached vector still applies.
+
+Implemented in `packages/core/src/retrieval/semantic.ts` and
+`embedding-cache.ts`, with the vendor adapter in
+`packages/cli/src/embedding-provider.ts`.
+
+**Cache entries are keyed by a hash of the embedded text, not by symbol ID.**
+That is the load-bearing choice. A symbol keeps its ID across edits to its
+body, so a symbol-keyed cache would serve a vector for text that no longer
+exists; a text-keyed one cannot. It also means identical text embeds once
+however many symbols carry it, and the model identifier lives in the cache
+header rather than the key, because vectors from different models are not
+comparable and a cache written by another model is discarded wholesale rather
+than merged. Entries the current run did not touch are pruned on write — the
+cache mirrors a rebuildable index, so unbounded growth would buy nothing.
+
+**Embedded text draws on the same fields BM25F does**, in a fixed order, so
+Configurations A and B are compared on the same information and any
+difference in recall is attributable to method rather than to one
+configuration having been fed more. Fields are labeled rather than
+concatenated bare.
+
+Surface: `spectrace analyze --mode semantic [--embedding-cache <file>]`,
+reporting how many texts were embedded and how many came from cache.
+Vectors are L2-normalized on the way in, so similarity is a dot product;
+ties break on symbol ID so equal scores never depend on iteration order
+(NFR-CORE-002).

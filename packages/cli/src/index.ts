@@ -16,6 +16,7 @@ import {
   CORE_VERSION,
   DEFAULT_BM25F_CONFIG,
   DuplicateSymbolIdIndexError,
+  EmbeddingCache,
   IndexArtifactFormatError,
   TEMPLATES,
   TRANSMISSION_LOG_ARTIFACT,
@@ -33,6 +34,9 @@ import {
   parseSymbolIndex,
   readRequirementDocuments,
   retrieveCandidates,
+  retrieveSemanticCandidates,
+  semanticConfigurationId,
+  serializeEmbeddingCache,
   serializeMetricsReport,
   serializeRetrievalResults,
   serializeSymbolIndex,
@@ -49,6 +53,7 @@ import {
   type TransmissionLog
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
+import { DEFAULT_EMBEDDING_MODEL, createOpenAIEmbeddingProvider } from "./embedding-provider.js";
 
 const program = new Command();
 
@@ -384,9 +389,16 @@ program
     "write exactly what would be transmitted to a model, and audit it against the bound (REQ-CORE-023)"
   )
   .option("--dry-run", "report what would be transmitted; performs zero model or embedding calls", false)
+  .option("--mode <mode>", "retrieval configuration: lexical (A) or semantic (B)", "lexical")
+  .option("--embedding-model <id>", `embedding model for --mode semantic (default ${DEFAULT_EMBEDDING_MODEL})`)
+  .option("--embedding-dimensions <n>", "shorten embedding vectors to this width")
+  .option(
+    "--embedding-cache <file>",
+    "reuse and update embedding vectors here, so a second run at the same commit calls no API (REQ-CORE-021)"
+  )
   .option("--json", "machine-readable output on stdout")
   .action(
-    (
+    async (
       opts: {
         requirements: string;
         index: string;
@@ -395,6 +407,10 @@ program
         out?: string;
         transmissionLog?: string;
         dryRun: boolean;
+        mode: string;
+        embeddingModel?: string;
+        embeddingDimensions?: string;
+        embeddingCache?: string;
         json?: boolean;
       },
       cmd: Command
@@ -438,16 +454,114 @@ program
       return;
     }
 
-    const results = retrieveCandidates({
-      queries: requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) })),
-      symbols,
-      topK,
-      repositoryCommit
-    });
+    if (opts.mode !== "lexical" && opts.mode !== "semantic") {
+      fail(
+        {
+          error: "invalid_mode",
+          message:
+            opts.mode === "hybrid"
+              ? "Hybrid retrieval (Configuration C) is REQ-CORE-022 and is not implemented yet."
+              : `--mode must be lexical or semantic; got ${opts.mode}.`
+        },
+        2
+      );
+      return;
+    }
+
+    const queries = requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) }));
+    let results: CandidateSet[];
+    let configurationId: string;
+    let embeddingReport: { embedded: number; cached: number; cachePath?: string } | undefined;
+
+    if (opts.mode === "lexical") {
+      results = retrieveCandidates({ queries, symbols, topK, repositoryCommit });
+      configurationId = DEFAULT_BM25F_CONFIG.configurationId;
+    } else {
+      // The key is read here and nowhere in core (CLAUDE.md rule 2).
+      const apiKey = process.env["OPENAI_API_KEY"];
+      if (!apiKey) {
+        fail(
+          {
+            error: "missing_api_key",
+            message: "Set OPENAI_API_KEY to run --mode semantic (Configuration B, REQ-CORE-021)."
+          },
+          2
+        );
+        return;
+      }
+
+      let dimensions: number | undefined;
+      if (opts.embeddingDimensions !== undefined) {
+        dimensions = Number.parseInt(opts.embeddingDimensions, 10);
+        if (!Number.isInteger(dimensions) || dimensions <= 0) {
+          fail(
+            {
+              error: "invalid_embedding_dimensions",
+              message: `--embedding-dimensions must be a positive integer; got ${opts.embeddingDimensions}.`
+            },
+            2
+          );
+          return;
+        }
+      }
+
+      let provider;
+      try {
+        provider = createOpenAIEmbeddingProvider({
+          apiKey,
+          ...(opts.embeddingModel ? { model: opts.embeddingModel } : {}),
+          ...(dimensions === undefined ? {} : { dimensions })
+        });
+      } catch (error) {
+        fail(
+          { error: "invalid_embedding_config", message: error instanceof Error ? error.message : String(error) },
+          2
+        );
+        return;
+      }
+
+      const cachePath = opts.embeddingCache ? resolve(opts.embeddingCache) : undefined;
+      let cache: EmbeddingCache | undefined;
+      if (cachePath && existsSync(cachePath)) {
+        try {
+          cache = EmbeddingCache.parse(readFileSync(cachePath, "utf8"), provider.modelId, provider.dimensions);
+        } catch {
+          // A corrupt cache costs API calls, not correctness — rebuild it.
+          cache = undefined;
+        }
+      }
+
+      let semantic;
+      try {
+        semantic = await retrieveSemanticCandidates({
+          queries,
+          symbols,
+          topK,
+          repositoryCommit,
+          provider,
+          ...(cache ? { cache } : {})
+        });
+      } catch (error) {
+        fail(
+          { error: "embedding_failed", message: error instanceof Error ? error.message : String(error) },
+          1
+        );
+        return;
+      }
+
+      results = semantic.results;
+      configurationId = semantic.results[0]?.configurationId ?? semanticConfigurationId(provider.modelId);
+      embeddingReport = { embedded: semantic.embeddedCount, cached: semantic.cachedCount };
+      if (cachePath) {
+        mkdirSync(dirname(cachePath), { recursive: true });
+        writeFileSync(cachePath, serializeEmbeddingCache(semantic.cache.toFile()), "utf8");
+        embeddingReport.cachePath = toPosixPath(cachePath);
+      }
+    }
 
     const provenance: RunProvenance = {
       repositoryCommit,
-      configurationId: DEFAULT_BM25F_CONFIG.configurationId,
+      configurationId,
       engineVersion: CORE_VERSION
     };
 
@@ -490,7 +604,9 @@ program
     if (cmd.optsWithGlobals().json) {
       printJson(process.stdout, {
         requirementCount: requirements.length,
+        mode: opts.mode,
         ...provenance,
+        ...(embeddingReport ? { embeddings: embeddingReport } : {}),
         ...(transmission
           ? {
               dryRun: opts.dryRun,
@@ -512,6 +628,12 @@ program
         `retrieved top-${topK} candidates for ${requirements.length} requirement(s) ` +
           `(config ${provenance.configurationId}, commit ${repositoryCommit})\n`
       );
+      if (embeddingReport) {
+        process.stdout.write(
+          `embedded ${embeddingReport.embedded} text(s), ${embeddingReport.cached} served from cache\n`
+        );
+        if (embeddingReport.cachePath) process.stdout.write(`${embeddingReport.cachePath}\n`);
+      }
       if (transmission) {
         const { audit } = transmission;
         process.stdout.write(

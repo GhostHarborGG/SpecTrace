@@ -20,3 +20,7 @@ runs/
 # shared per-repo settings, so CI validates against the same ones you do.
 .spectrace/index.json
 .spectrace/index.jsonl
+
+# Embedding vector cache (REQ-CORE-021): a pure cost optimization, rebuildable
+# by re-embedding. Machine-local, and large.
+.spectrace/embeddings.json

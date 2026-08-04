@@ -125,6 +125,28 @@ export {
 } from "./retrieval/bm25.js";
 export { tokenize } from "./retrieval/tokenizer.js";
 
+// ---------- Semantic retrieval (REQ-CORE-021, Configuration B) ----------
+
+export {
+  retrieveSemanticCandidates,
+  symbolEmbeddingText,
+  semanticConfigurationId,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  SEMANTIC_CONFIGURATION_VERSION,
+  type EmbeddingProvider,
+  type SemanticRetrieveOptions,
+  type SemanticRetrieveResult
+} from "./retrieval/semantic.js";
+export {
+  EmbeddingCache,
+  EmbeddingCacheFormatError,
+  embeddingKey,
+  serializeEmbeddingCache,
+  EMBEDDING_CACHE_ARTIFACT,
+  EMBEDDING_CACHE_VERSION,
+  type EmbeddingCacheFile
+} from "./retrieval/embedding-cache.js";
+
 // ---------- Bounded candidate sets (REQ-CORE-023) ----------
 
 export {
