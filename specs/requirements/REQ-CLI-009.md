@@ -35,8 +35,9 @@ Two subcommands were added on 2026-08-03 to serve the Phase C gate
 ("Recall@k table for A and B is report-ready"):
 
 - `evaluate compare --metrics <file>… [--label <name>…] [--format
-  markdown|csv|text]` — aligns metrics artifacts across configurations into
-  one table. Pure computation over already-computed metrics; no network.
+  markdown|csv|text] [--chart <file.svg>]` — aligns metrics artifacts across
+  configurations into one table, and optionally a Recall@k figure. Pure
+  computation over already-computed metrics; no network.
 - `evaluate sweep --requirements <dir> --index <file> --ground-truth <file>
   [--modes lexical,semantic,hybrid]` — runs each configuration against one
   index, evaluates each, and writes results, metrics, and comparison
@@ -58,3 +59,10 @@ ACs are deliberately left unedited until then, and all three still hold for
 A partial sweep exits 1 and names what it skipped rather than reporting
 success over a subset — the same reasoning as the comparison's `omitted`
 list.
+
+Figures are self-contained SVG (no scripts, no external fonts, no network),
+so they survive being dropped into a report or a PDF. They carry the
+comparison's `omitted` list as footnotes for the same reason the tables do,
+and a fourth configuration is dropped with a stated footnote rather than
+given a generated hue — the palette seats three at the required
+colour-vision separation.

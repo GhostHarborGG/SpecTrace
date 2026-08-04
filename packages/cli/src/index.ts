@@ -60,6 +60,7 @@ import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
 import { DEFAULT_EMBEDDING_MODEL } from "./embedding-provider.js";
 import { runRetrieval } from "./retrieval-run.js";
 import { COMPARISON_FORMATS, renderComparison, type ComparisonFormat } from "./comparison-format.js";
+import { renderComparisonChart } from "./comparison-chart.js";
 
 const program = new Command();
 
@@ -779,10 +780,20 @@ evaluate
   )
   .option("--format <fmt>", `output format: ${COMPARISON_FORMATS.join(" | ")}`, "text")
   .option("--out <file>", "also write the comparison as a JSON artifact")
+  .option("--chart <file>", "also write a Recall@k chart as a self-contained SVG figure")
+  .option("--chart-k <n>", "k to chart (default: the largest k the comparison shares)")
   .option("--json", "machine-readable output on stdout")
   .action(
     (
-      opts: { metrics: string[]; label: string[]; format: string; out?: string; json?: boolean },
+      opts: {
+        metrics: string[];
+        label: string[];
+        format: string;
+        out?: string;
+        chart?: string;
+        chartK?: string;
+        json?: boolean;
+      },
       cmd: Command
     ) => {
       if (!COMPARISON_FORMATS.includes(opts.format as ComparisonFormat)) {
@@ -837,6 +848,29 @@ evaluate
         const outPath = resolve(opts.out);
         mkdirSync(dirname(outPath), { recursive: true });
         writeFileSync(outPath, serializeMetricsComparison(comparison), "utf8");
+      }
+
+      if (opts.chart) {
+        const chartPath = resolve(opts.chart);
+        let chartK: number | undefined;
+        if (opts.chartK !== undefined) {
+          chartK = Number.parseInt(opts.chartK, 10);
+          if (!Number.isInteger(chartK)) {
+            fail({ error: "invalid_chart_k", message: `--chart-k must be an integer; got ${opts.chartK}.` }, 2);
+            return;
+          }
+        }
+        try {
+          mkdirSync(dirname(chartPath), { recursive: true });
+          writeFileSync(
+            chartPath,
+            renderComparisonChart(comparison, chartK === undefined ? {} : { k: chartK }),
+            "utf8"
+          );
+        } catch (error) {
+          fail({ error: "chart_failed", message: error instanceof Error ? error.message : String(error) }, 2);
+          return;
+        }
       }
 
       if (cmd.optsWithGlobals().json) {
@@ -1042,6 +1076,14 @@ evaluate
           "utf8"
         );
         writeFileSync(resolve(outDir, "comparison.csv"), renderComparison(comparison, "csv"), "utf8");
+        // One figure per k, so the report can show recall at whichever k it argues about.
+        for (const k of comparison.ks) {
+          writeFileSync(
+            resolve(outDir, `recall-at-${k}.svg`),
+            renderComparisonChart(comparison, { k }),
+            "utf8"
+          );
+        }
       }
 
       if (cmd.optsWithGlobals().json) {
