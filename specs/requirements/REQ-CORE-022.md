@@ -2,7 +2,7 @@
 id: REQ-CORE-022
 title: Hybrid retrieval (Configuration C)
 spec: SPEC-CORE-000
-status: partial
+status: implemented
 priority: P1
 links: []
 acceptance_criteria:
@@ -45,15 +45,41 @@ lexical is local.
 every command-line option as an override, so changing the file alone switches
 between Configurations A, B, and C against the same index artifact.
 
-`rrf-v1` is the provisional default. It merges on ranks, so it needs no
-calibration between unbounded BM25 scores and cosine similarities bounded to
-[−1, 1] — the scale mismatch that makes a naive weighted sum fragile. That is
-a reason to make it the one to beat, not a measurement; **the default is BP's
-to confirm once both strategies have run on the frozen corpus.**
+## Measured, 2026-08-04 — `rrf-v1` stands as the default
 
-Status is `partial`: the merge strategies, their versioned identity, and
-configuration-driven selection are implemented and tested, but the criterion's
-second clause — the evaluation harness running all three against the same
-index — is a capability that has not yet been demonstrated end to end, since
-Configurations B and C need a live embedding key. It flips to `implemented`
-with that comparison run.
+All four configurations were run against the same index on the frozen
+`hookable` corpus (BP ran A/B/C; the `weighted-v1` arm was added from the
+embedding cache at zero API cost). Overall figures:
+
+| | R@1 | R@3 | R@5 | R@10 | MRR |
+|---|---|---|---|---|---|
+| A lexical `bm25f-v5` | .250 | .708 | .750 | .917 | .515 |
+| B semantic `text-embedding-3-small` | .625 | .792 | **1.000** | 1.000 | .774 |
+| C `rrf-v1` | .625 | .792 | .875 | 1.000 | **.794** |
+| C `weighted-v1` | .583 | **.833** | .875 | 1.000 | .750 |
+
+**Decision: `rrf-v1` remains the default.** It leads on MRR (.794 vs .750)
+and R@1, ties at R@5 and R@10, and trails only at R@3. The margin is thin —
+see the caveat below — so the tie-break is the standing argument plus the
+fact that `rrf-v1` has no tunable: `weighted-v1`'s α would have to be
+justified and would spend overfitting budget to win back a gap this small.
+
+**The caveat that governs all of this: n = 12.** One requirement is 0.083 of
+overall recall and 0.25 of a per-stratum figure. The `rrf-v1`/`weighted-v1`
+spread is at most 0.042 overall — **half a requirement**. That is not
+evidence of a better strategy; it is a coin landing. The honest statement is
+that the two strategies are indistinguishable on this corpus and `rrf-v1` was
+kept on parsimony. The A-vs-B gap, by contrast, is 3 requirements at R@5 and
+holds in the same direction at every k and every stratum — that one is real.
+
+**Hybrid does not earn its place over semantic here.** At R@5, C scores .875
+against B's 1.000: merging in the weaker lexical list *costs* a requirement
+that semantic alone retrieved. RRF gives each list an equal vote, and on this
+corpus the lists are not of equal quality. C's only edge is MRR (+.020 over
+B), which is inside the half-requirement noise floor. Recorded here rather
+than acted on: changing the default `retrieval.mode` is a cost decision as
+well as a quality one, and belongs to BP.
+
+AC1 now holds in both clauses — the three configurations are selected purely
+by `.spectrace/config.yaml`, and the harness has run all of them against one
+index.

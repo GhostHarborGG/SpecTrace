@@ -56,6 +56,17 @@ difference in recall is attributable to method rather than to one
 configuration having been fed more. Fields are labeled rather than
 concatenated bare.
 
+**A fully cached run needs no API key at all** (added 2026-08-04). If
+`--embedding-cache` points at a cache that already covers the corpus, the CLI
+builds a cache-only provider from the cache header's model ID and dimensions
+and refuses to embed anything new. Requiring credentials for a run that
+performs zero API calls contradicted what AC1 claims, and it blocked offline
+reproduction of a recorded evaluation. It also turns AC1 from an assertion
+into an observation: the run either succeeds without a key — proving every
+vector was cached — or fails naming how many texts were missing. A cache
+built from a different corpus fails loudly rather than ranking against
+whatever it happens to hold.
+
 Surface: `spectrace analyze --mode semantic [--embedding-cache <file>]`,
 reporting how many texts were embedded and how many came from cache.
 Vectors are L2-normalized on the way in, so similarity is a dot product;

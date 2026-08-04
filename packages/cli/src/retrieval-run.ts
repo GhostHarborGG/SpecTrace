@@ -12,6 +12,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
 import { dirname } from "node:path";
 import {
   DEFAULT_MERGE_STRATEGY,
@@ -27,6 +28,45 @@ import {
   type RetrievalMode
 } from "@spectrace/core";
 import { createOpenAIEmbeddingProvider } from "./embedding-provider.js";
+import type { EmbeddingProvider } from "@spectrace/core";
+
+/**
+ * A provider that serves only what a cache already holds and refuses to
+ * embed anything new.
+ *
+ * Model identity and vector width come from the cache header — the same two
+ * facts that make the stored vectors interpretable at all — so a cached run
+ * needs no key, no network, and no model configuration. That is what lets a
+ * recorded evaluation be reproduced offline, and it is what makes
+ * REQ-CORE-021 AC1 observable rather than merely asserted: if the second run
+ * really performs zero API calls, it should not need credentials either.
+ */
+function createCacheOnlyProvider(cachePath: string): EmbeddingProvider {
+  let header: { modelId?: unknown; dimensions?: unknown };
+  try {
+    header = JSON.parse(readFileSync(cachePath, "utf8")) as typeof header;
+  } catch (cause) {
+    throw new Error(
+      `Cannot read the embedding cache at ${cachePath}: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+  }
+  if (typeof header.modelId !== "string" || typeof header.dimensions !== "number") {
+    throw new Error(`${cachePath} is not an embedding cache (no modelId/dimensions header).`);
+  }
+
+  return {
+    modelId: header.modelId,
+    dimensions: header.dimensions,
+    embed(texts) {
+      return Promise.reject(
+        new Error(
+          `${texts.length} text(s) are not in the embedding cache. Set OPENAI_API_KEY to embed them, ` +
+            `or point --embedding-cache at a cache built from this exact corpus.`
+        )
+      );
+    }
+  };
+}
 
 export interface EmbeddingRunOptions {
   /** Absent means Configurations B and C cannot run; A is unaffected. */
@@ -86,22 +126,31 @@ export async function runRetrieval(options: RetrievalRunOptions): Promise<Retrie
   }
 
   const embedding = options.embedding ?? {};
-  if (!embedding.apiKey) {
+  const cacheOnly = !embedding.apiKey;
+
+  if (cacheOnly && !(embedding.cachePath && existsSync(embedding.cachePath))) {
     return {
       ok: false,
       error: "missing_api_key",
-      message: `Set OPENAI_API_KEY to run retrieval mode "${options.mode}" (REQ-CORE-021).`,
+      message: `Set OPENAI_API_KEY to run retrieval mode "${options.mode}", or pass --embedding-cache pointing at a cache that already covers this corpus (REQ-CORE-021).`,
       exitCode: 2
     };
   }
 
   let provider;
   try {
-    provider = createOpenAIEmbeddingProvider({
-      apiKey: embedding.apiKey,
-      ...(embedding.model ? { model: embedding.model } : {}),
-      ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions })
-    });
+    provider = cacheOnly
+      ? // A run whose every vector is already cached performs zero API calls
+        // by definition (REQ-CORE-021 AC1), so demanding a key for it would
+        // contradict the requirement and block offline reproduction of a
+        // recorded run. The model identity comes from the cache header, which
+        // is the only thing that makes those vectors interpretable.
+        createCacheOnlyProvider(embedding.cachePath!)
+      : createOpenAIEmbeddingProvider({
+          apiKey: embedding.apiKey!,
+          ...(embedding.model ? { model: embedding.model } : {}),
+          ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions })
+        });
   } catch (error) {
     return {
       ok: false,
