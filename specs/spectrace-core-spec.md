@@ -169,7 +169,7 @@ same index.
 |---|---|---|---|
 | [REQ-CORE-020](requirements/REQ-CORE-020.md) | Lexical retrieval (Configuration A) | P0 | implemented |
 | [REQ-CORE-021](requirements/REQ-CORE-021.md) | Semantic retrieval (Configuration B) | P1 | implemented |
-| [REQ-CORE-022](requirements/REQ-CORE-022.md) | Hybrid retrieval (Configuration C) | P1 | proposed |
+| [REQ-CORE-022](requirements/REQ-CORE-022.md) | Hybrid retrieval (Configuration C) | P1 | partial |
 | [REQ-CORE-023](requirements/REQ-CORE-023.md) | Bounded candidate sets | P0 | implemented |
 <!-- spectrace:end -->
 
@@ -182,6 +182,18 @@ patches and run artifacts are retained as negative results for the evaluation
 report. The measured-version cap that stopped that optimization loop is
 methodology, recorded in `docs/feasibility-error-analysis.md`, not a
 requirement.
+
+**Hybrid ships two merge strategies, not one.** Resolved 2026-08-03 (BP):
+`rrf-v1` (reciprocal rank fusion) and `weighted-v1` (normalized α-weighted
+sum) both ship behind one versioned registry, both run on the frozen corpus,
+and the default is chosen from the numbers rather than argued for. `rrf-v1` is
+provisionally first because merging on ranks needs no calibration between
+unbounded BM25 scores and cosine similarities bounded to [−1, 1] — but that
+is a reason to make it the one to beat, not a result. Merge identifiers share
+the namespace with the lexical scoring versions, so a strategy is burned the
+same way a BM25F revision is. Each configuration retrieves a pool wider than
+the output before merging, since a merge of two already-truncated lists has
+little disagreement left to exploit.
 
 **The engine embeds nothing itself.** Configuration B declares an
 `EmbeddingProvider` interface and requires the client to supply one — the CLI

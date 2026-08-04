@@ -15,7 +15,13 @@ import {
   CONFIG_FILE_RELATIVE_PATH,
   CORE_VERSION,
   DEFAULT_BM25F_CONFIG,
+  DEFAULT_MERGE_STRATEGY,
+  DEFAULT_RRF_K,
+  DEFAULT_ALPHA,
   DuplicateSymbolIdIndexError,
+  MERGE_STRATEGY_IDS,
+  mergeCandidateSets,
+  mergePoolSize,
   EmbeddingCache,
   IndexArtifactFormatError,
   TEMPLATES,
@@ -35,7 +41,6 @@ import {
   readRequirementDocuments,
   retrieveCandidates,
   retrieveSemanticCandidates,
-  semanticConfigurationId,
   serializeEmbeddingCache,
   serializeMetricsReport,
   serializeRetrievalResults,
@@ -45,6 +50,8 @@ import {
   type CandidateSet,
   type CodeSymbol,
   type GroundTruthFile,
+  type MergeConfig,
+  type MergeStrategyId,
   type MetricsArtifact,
   type RequirementDocument,
   type RunProvenance,
@@ -376,7 +383,8 @@ program
   )
   .requiredOption("--requirements <dir>", "directory of requirement .md files (prelim spec §6.3 format)")
   .requiredOption("--index <file>", "JSONL symbol index produced by `spectrace index`")
-  .option("--top-k <n>", "candidates to retain per requirement", "10")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml, which supplies the defaults below", ".")
+  .option("--top-k <n>", "candidates to retain per requirement (default: config retrieval.topK)")
   .option(
     "--req <id>",
     "restrict the run to this requirement (repeatable; absent, every requirement is analyzed)",
@@ -389,8 +397,14 @@ program
     "write exactly what would be transmitted to a model, and audit it against the bound (REQ-CORE-023)"
   )
   .option("--dry-run", "report what would be transmitted; performs zero model or embedding calls", false)
-  .option("--mode <mode>", "retrieval configuration: lexical (A) or semantic (B)", "lexical")
-  .option("--embedding-model <id>", `embedding model for --mode semantic (default ${DEFAULT_EMBEDDING_MODEL})`)
+  .option("--mode <mode>", "retrieval configuration: lexical (A), semantic (B), or hybrid (C) (default: config retrieval.mode)")
+  .option(
+    "--merge-strategy <id>",
+    `hybrid merge strategy: ${MERGE_STRATEGY_IDS.join(" | ")} (default ${DEFAULT_MERGE_STRATEGY})`
+  )
+  .option("--rrf-k <n>", `rank damping for rrf-v1 (default ${DEFAULT_RRF_K})`)
+  .option("--alpha <n>", `lexical share for weighted-v1, 0..1 (default ${DEFAULT_ALPHA})`)
+  .option("--embedding-model <id>", `embedding model (default: config model.embedding, else ${DEFAULT_EMBEDDING_MODEL})`)
   .option("--embedding-dimensions <n>", "shorten embedding vectors to this width")
   .option(
     "--embedding-cache <file>",
@@ -402,12 +416,16 @@ program
       opts: {
         requirements: string;
         index: string;
-        topK: string;
+        repo: string;
+        topK?: string;
         req: string[];
         out?: string;
         transmissionLog?: string;
         dryRun: boolean;
-        mode: string;
+        mode?: string;
+        mergeStrategy?: string;
+        rrfK?: string;
+        alpha?: string;
         embeddingModel?: string;
         embeddingDimensions?: string;
         embeddingCache?: string;
@@ -448,46 +466,74 @@ program
       return;
     }
 
-    const topK = Number.parseInt(opts.topK, 10);
+    // Configurations A, B, and C are selectable purely by configuration
+    // (REQ-CORE-022 AC1); every flag below is an override, not the source.
+    const { config } = loadConfig(resolve(opts.repo));
+
+    const topK = opts.topK === undefined ? config.retrieval.topK : Number.parseInt(opts.topK, 10);
     if (!Number.isInteger(topK) || topK <= 0) {
       fail({ error: "invalid_top_k", message: `--top-k must be a positive integer; got ${opts.topK}.` }, 2);
       return;
     }
 
-    if (opts.mode !== "lexical" && opts.mode !== "semantic") {
+    const mode = opts.mode ?? config.retrieval.mode;
+    if (mode !== "lexical" && mode !== "semantic" && mode !== "hybrid") {
+      fail({ error: "invalid_mode", message: `Retrieval mode must be lexical, semantic, or hybrid; got ${mode}.` }, 2);
+      return;
+    }
+
+    const mergeStrategy = (opts.mergeStrategy ?? DEFAULT_MERGE_STRATEGY) as MergeStrategyId;
+    if (!MERGE_STRATEGY_IDS.includes(mergeStrategy)) {
       fail(
         {
-          error: "invalid_mode",
-          message:
-            opts.mode === "hybrid"
-              ? "Hybrid retrieval (Configuration C) is REQ-CORE-022 and is not implemented yet."
-              : `--mode must be lexical or semantic; got ${opts.mode}.`
+          error: "invalid_merge_strategy",
+          message: `--merge-strategy must be one of ${MERGE_STRATEGY_IDS.join(", ")}; got ${opts.mergeStrategy}.`
         },
         2
       );
       return;
     }
 
+    const numericOption = (raw: string | undefined, flag: string, check: (n: number) => boolean) => {
+      if (raw === undefined) return { ok: true as const, value: undefined };
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || !check(parsed)) {
+        fail({ error: "invalid_option", message: `${flag} got an unusable value: ${raw}.` }, 2);
+        return { ok: false as const, value: undefined };
+      }
+      return { ok: true as const, value: parsed };
+    };
+
+    const rrfK = numericOption(opts.rrfK, "--rrf-k", (n) => n > 0);
+    if (!rrfK.ok) return;
+    const alpha = numericOption(opts.alpha, "--alpha", (n) => n >= 0 && n <= 1);
+    if (!alpha.ok) return;
+
+    const mergeConfig: MergeConfig = {
+      strategy: mergeStrategy,
+      ...(rrfK.value === undefined ? {} : { rrfK: rrfK.value }),
+      ...(alpha.value === undefined ? {} : { alpha: alpha.value })
+    };
+
     const queries = requirements.map((r) => ({ requirementId: r.id, text: buildRequirementQueryText(r) }));
-    let results: CandidateSet[];
-    let configurationId: string;
+    // Hybrid retrieves a wider pool per configuration, then merges down to
+    // topK — a merge of two k-truncated lists has little to work with.
+    const retrievalK = mode === "hybrid" ? mergePoolSize(topK) : topK;
+
     let embeddingReport: { embedded: number; cached: number; cachePath?: string } | undefined;
 
-    if (opts.mode === "lexical") {
-      results = retrieveCandidates({ queries, symbols, topK, repositoryCommit });
-      configurationId = DEFAULT_BM25F_CONFIG.configurationId;
-    } else {
-      // The key is read here and nowhere in core (CLAUDE.md rule 2).
+    /** Configuration B. Constructs the provider here because core never may (CLAUDE.md rule 2). */
+    const runSemantic = async (): Promise<CandidateSet[] | undefined> => {
       const apiKey = process.env["OPENAI_API_KEY"];
       if (!apiKey) {
         fail(
           {
             error: "missing_api_key",
-            message: "Set OPENAI_API_KEY to run --mode semantic (Configuration B, REQ-CORE-021)."
+            message: `Set OPENAI_API_KEY to run retrieval mode "${mode}" (REQ-CORE-021).`
           },
           2
         );
-        return;
+        return undefined;
       }
 
       let dimensions: number | undefined;
@@ -501,15 +547,16 @@ program
             },
             2
           );
-          return;
+          return undefined;
         }
       }
 
+      const model = opts.embeddingModel ?? config.model.embedding ?? undefined;
       let provider;
       try {
         provider = createOpenAIEmbeddingProvider({
           apiKey,
-          ...(opts.embeddingModel ? { model: opts.embeddingModel } : {}),
+          ...(model ? { model } : {}),
           ...(dimensions === undefined ? {} : { dimensions })
         });
       } catch (error) {
@@ -517,7 +564,7 @@ program
           { error: "invalid_embedding_config", message: error instanceof Error ? error.message : String(error) },
           2
         );
-        return;
+        return undefined;
       }
 
       const cachePath = opts.embeddingCache ? resolve(opts.embeddingCache) : undefined;
@@ -536,28 +583,42 @@ program
         semantic = await retrieveSemanticCandidates({
           queries,
           symbols,
-          topK,
+          topK: retrievalK,
           repositoryCommit,
           provider,
           ...(cache ? { cache } : {})
         });
       } catch (error) {
-        fail(
-          { error: "embedding_failed", message: error instanceof Error ? error.message : String(error) },
-          1
-        );
-        return;
+        fail({ error: "embedding_failed", message: error instanceof Error ? error.message : String(error) }, 1);
+        return undefined;
       }
 
-      results = semantic.results;
-      configurationId = semantic.results[0]?.configurationId ?? semanticConfigurationId(provider.modelId);
       embeddingReport = { embedded: semantic.embeddedCount, cached: semantic.cachedCount };
       if (cachePath) {
         mkdirSync(dirname(cachePath), { recursive: true });
         writeFileSync(cachePath, serializeEmbeddingCache(semantic.cache.toFile()), "utf8");
         embeddingReport.cachePath = toPosixPath(cachePath);
       }
+      return semantic.results;
+    };
+
+    const runLexical = () =>
+      retrieveCandidates({ queries, symbols, topK: retrievalK, repositoryCommit });
+
+    let results: CandidateSet[];
+    if (mode === "lexical") {
+      results = runLexical();
+    } else if (mode === "semantic") {
+      const semantic = await runSemantic();
+      if (semantic === undefined) return;
+      results = semantic;
+    } else {
+      const semantic = await runSemantic();
+      if (semantic === undefined) return;
+      results = mergeCandidateSets({ lexical: runLexical(), semantic, topK, config: mergeConfig });
     }
+
+    const configurationId = results[0]?.configurationId ?? DEFAULT_BM25F_CONFIG.configurationId;
 
     const provenance: RunProvenance = {
       repositoryCommit,
@@ -604,7 +665,9 @@ program
     if (cmd.optsWithGlobals().json) {
       printJson(process.stdout, {
         requirementCount: requirements.length,
-        mode: opts.mode,
+        mode,
+        topK,
+        ...(mode === "hybrid" ? { merge: mergeConfig } : {}),
         ...provenance,
         ...(embeddingReport ? { embeddings: embeddingReport } : {}),
         ...(transmission

@@ -349,23 +349,66 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     expect(stderr).toContain("OPENAI_API_KEY");
   });
 
-  it("rejects an unimplemented mode by name (REQ-CORE-022 lands next)", () => {
-    const hybrid = run([
-      "analyze",
-      "--requirements", path.join(repo, "bounded-reqs"),
-      "--index", indexPath,
-      "--mode", "hybrid"
-    ]);
-    expect(hybrid.status).toBe(2);
-    expect(hybrid.stderr).toContain("REQ-CORE-022");
-
-    const nonsense = run([
+  it("rejects a retrieval mode that is not one of the three configurations", () => {
+    const { status } = run([
       "analyze",
       "--requirements", path.join(repo, "bounded-reqs"),
       "--index", indexPath,
       "--mode", "telepathy"
     ]);
-    expect(nonsense.status).toBe(2);
+    expect(status).toBe(2);
+  });
+
+  it("takes mode and k from configuration alone, with flags as overrides (REQ-CORE-022 AC1)", () => {
+    const requirements = path.join(repo, "bounded-reqs");
+    const configPath = path.join(repo, ".spectrace", "config.yaml");
+    mkdirSync(path.dirname(configPath), { recursive: true });
+
+    // Configuration A, k=2, named nowhere on the command line.
+    writeFileSync(configPath, "version: 1\nretrieval:\n  mode: lexical\n  topK: 2\n", "utf8");
+    const fromConfig = JSON.parse(
+      run(["analyze", "--requirements", requirements, "--index", indexPath, "--repo", repo, "--json"]).stdout
+    );
+    expect(fromConfig.mode).toBe("lexical");
+    expect(fromConfig.topK).toBe(2);
+    expect(fromConfig.results[0].candidates.length).toBeLessThanOrEqual(2);
+
+    // Switching the config alone switches the configuration: mode C is
+    // selected without a flag, and reaches the semantic half (no key here,
+    // so it stops at the key check rather than at a mode check).
+    writeFileSync(configPath, "version: 1\nretrieval:\n  mode: hybrid\n  topK: 2\n", "utf8");
+    const hybrid = run(
+      ["analyze", "--requirements", requirements, "--index", indexPath, "--repo", repo],
+      envWithoutApiKey()
+    );
+    expect(hybrid.status).toBe(2);
+    expect(hybrid.stderr).toContain("hybrid");
+    expect(hybrid.stderr).toContain("OPENAI_API_KEY");
+
+    // A flag still wins over the file.
+    const overridden = JSON.parse(
+      run([
+        "analyze",
+        "--requirements", requirements,
+        "--index", indexPath,
+        "--repo", repo,
+        "--mode", "lexical",
+        "--top-k", "3",
+        "--json"
+      ]).stdout
+    );
+    expect(overridden.mode).toBe("lexical");
+    expect(overridden.topK).toBe(3);
+
+    rmSync(configPath);
+  });
+
+  it("rejects an unknown merge strategy and an out-of-range alpha", () => {
+    const requirements = path.join(repo, "bounded-reqs");
+    const base = ["analyze", "--requirements", requirements, "--index", indexPath, "--mode", "lexical"];
+    expect(run([...base, "--merge-strategy", "vibes"]).status).toBe(2);
+    expect(run([...base, "--alpha", "1.5"]).status).toBe(2);
+    expect(run([...base, "--rrf-k", "0"]).status).toBe(2);
   });
 
   it("feeds analyze without a separate conversion step", () => {

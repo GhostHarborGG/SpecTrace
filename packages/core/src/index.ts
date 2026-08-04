@@ -147,6 +147,21 @@ export {
   type EmbeddingCacheFile
 } from "./retrieval/embedding-cache.js";
 
+// ---------- Hybrid retrieval (REQ-CORE-022, Configuration C) ----------
+
+export {
+  mergeCandidateSets,
+  hybridConfigurationId,
+  mergePoolSize,
+  MERGE_STRATEGY_IDS,
+  DEFAULT_MERGE_STRATEGY,
+  DEFAULT_RRF_K,
+  DEFAULT_ALPHA,
+  type MergeStrategyId,
+  type MergeConfig,
+  type MergeOptions
+} from "./retrieval/hybrid.js";
+
 // ---------- Bounded candidate sets (REQ-CORE-023) ----------
 
 export {
