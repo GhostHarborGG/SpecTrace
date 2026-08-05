@@ -126,6 +126,141 @@ pnpm cli index --json                 # build the symbol index
 SpecTrace traces itself — the commands above run against this repository's own
 `specs/` vault, which is both the specification and the dogfood target.
 
+### Setting up a new workstation
+
+Quick start is the whole install on a machine that already has the toolchain.
+From a bare checkout, work through the six steps below — step 4 is a trap that
+fails silently, and steps 5 and 6 are conditional. Where a command differs by
+platform, both forms are given; everything else is identical on macOS, Windows,
+and Linux.
+
+**1. Node ≥ 20.** Any install method works; `node -v` should report 20 or
+later. CI runs Node 22 across the Ubuntu, Windows, and macOS matrix.
+
+**2. pnpm 10, via Corepack.** The exact version is pinned in the root
+`package.json` `packageManager` field, so let Corepack read it rather than
+installing pnpm globally:
+
+```bash
+corepack enable       # ships with Node; downloads the pinned pnpm on first use
+pnpm -v               # 10.14.0
+```
+
+On Windows, `corepack enable` writes its shims into the Node installation
+directory, so run it from an **Administrator** shell — without elevation it
+fails with `EPERM` and `pnpm` stays unresolvable.
+
+**3. Install, build, verify.** From the repository root:
+
+```bash
+pnpm install
+pnpm build
+pnpm typecheck
+pnpm test
+pnpm spec:index:check     # requirement tables match specs/requirements/
+```
+
+A healthy checkout is green on all four checks. They are also exactly what CI
+runs, in the same order — if `spec:index:check` fails on a fresh clone,
+something is wrong with the checkout, not with your edits.
+
+**4. Electron's runtime binary (Studio only).** `pnpm install` may record
+Electron's postinstall as complete without actually downloading the platform
+binary, and neither `pnpm install` nor `pnpm rebuild` will retry it — the
+postinstall is already recorded as done. Studio then dies at launch with
+`Error: Electron uninstall`. Check whether the binary is there:
+
+```bash
+# macOS / Linux
+ls node_modules/.pnpm/electron@*/node_modules/electron/dist
+```
+
+```powershell
+# Windows (PowerShell)
+Get-ChildItem node_modules\.pnpm\electron@*\node_modules\electron\dist
+```
+
+If that directory is missing, force the download by running the package's own
+installer in place:
+
+```bash
+# macOS / Linux
+cd node_modules/.pnpm/electron@*/node_modules/electron && node install.js
+```
+
+```powershell
+# Windows (PowerShell)
+Set-Location node_modules\.pnpm\electron@*\node_modules\electron
+node install.js
+```
+
+A healthy result is a `dist/` directory plus a `path.txt` naming the binary
+(`Electron.app/Contents/MacOS/Electron` on macOS, `electron.exe` on Windows).
+Then `pnpm --filter @spectrace/studio dev` starts the app.
+
+This affects Studio alone — core, the CLI, and the whole test suite are
+unaffected, which is why CI sets `ELECTRON_SKIP_BINARY_DOWNLOAD=1` and never
+needs the binary. A developer machine does.
+
+**5. `OPENAI_API_KEY`, only if you need semantic retrieval.** Lexical retrieval
+(Configuration A) needs no key and no network. Semantic and hybrid modes embed
+through OpenAI `text-embedding-3`, and per REQ-CORE-021 the CLI checks for the
+key up front and names it rather than failing partway through a run:
+
+```bash
+# macOS / Linux
+export OPENAI_API_KEY=sk-...
+```
+
+```powershell
+# Windows (PowerShell) — current session only
+$env:OPENAI_API_KEY = "sk-..."
+```
+
+The embedding cache at `.spectrace/embeddings.json` is a machine-local cost
+optimization and is deliberately gitignored, so it does not travel with a
+clone — each workstation starts cold. A run whose corpus is fully covered by a
+cache needs no key at all, so you can point `--embedding-cache <file>` at a
+cache copied across from your other machine (the file is portable; it is
+excluded from the repository for size, not for platform reasons) rather than
+paying the one-time embedding cost twice.
+
+**6. Line endings — leave them alone (Windows).** `.gitattributes` pins every
+text file to LF with `* text=auto eol=lf`, and that is deliberate: byte-identical
+index rebuilds (REQ-CORE-012 AC1) and the CLI JSON parity snapshots have to
+match across Windows and macOS. Git's per-file attribute wins over a global
+`core.autocrlf=true`, so the default Git for Windows setting does no harm and
+needs no change. Do not "fix" a diff that looks like a whole-file line-ending
+change by overriding it — that breaks snapshot parity for everyone else.
+
+#### What does not travel between machines
+
+If you work across more than one workstation, these are the things a clone will
+not bring with it. All of them are regenerable by design — nothing exists only
+in an ignored path.
+
+| Path | Why it is ignored | How to get it back |
+|---|---|---|
+| `node_modules/`, `dist/`, `out/` | Build output | `pnpm install && pnpm build` |
+| `.spectrace/index.json` | Rebuildable from specs + repository (REQ-CORE-012) | `pnpm cli index` |
+| `.spectrace/embeddings.json` | Machine-local cost cache, and large | Re-embed, or copy the file across |
+| `runs/` | Working run artifacts (REQ-CORE-071) | Re-run; promote keepers deliberately |
+| `.env` | Secrets | Re-export the key (step 5) |
+
+`.spectrace/config.yaml` and `.spectrace/templates/` **are** committed — shared
+per-repo settings, so both machines and CI validate against the same ones.
+
+#### Troubleshooting
+
+| Symptom | Platform | Cause | Fix |
+|---|---|---|---|
+| `pnpm: command not found` | all | Corepack not enabled | `corepack enable` |
+| `corepack enable` fails with `EPERM` | Windows | Shims need the Node install directory | Re-run from an Administrator shell |
+| `Error: Electron uninstall` | all | Electron binary never downloaded | Step 4 above |
+| `missing_api_key` in analyze output | all | Semantic/hybrid mode without a key or a covering cache | Step 5 above |
+| `spec:index:check` fails | all | A requirement table drifted from its frontmatter | `pnpm spec:index` — never hand-edit a generated table |
+| Whole files show as modified after checkout | Windows | Line-ending override fighting `.gitattributes` | Step 6 above |
+
 ### Command surface
 
 | Command | Purpose | Status |
