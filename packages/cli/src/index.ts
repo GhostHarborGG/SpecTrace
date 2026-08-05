@@ -396,7 +396,12 @@ program
     "--transmission-log <file>",
     "write exactly what would be transmitted to a model, and audit it against the bound (REQ-CORE-023)"
   )
-  .option("--dry-run", "report what would be transmitted; performs zero model or embedding calls", false)
+  .option(
+    "--dry-run",
+    "report what would be transmitted to a ranking model without calling one. Retrieval still runs, " +
+      "so in semantic and hybrid mode the corpus is still embedded — the report says how much",
+    false
+  )
   .option("--mode <mode>", "retrieval configuration: lexical (A), semantic (B), or hybrid (C) (default: config retrieval.mode)")
   .option(
     "--merge-strategy <id>",
@@ -409,6 +414,12 @@ program
   .option(
     "--embedding-cache <file>",
     "reuse and update embedding vectors here, so a second run at the same commit calls no API (REQ-CORE-021)"
+  )
+  .option(
+    "--accept-corpus-transmission",
+    "accept that semantic and hybrid mode send every indexed symbol to the embedding provider, " +
+      "not just the top-k candidates (REQ-CORE-023 AC3)",
+    false
   )
   .option("--json", "machine-readable output on stdout")
   .action(
@@ -429,6 +440,7 @@ program
         embeddingModel?: string;
         embeddingDimensions?: string;
         embeddingCache?: string;
+        acceptCorpusTransmission: boolean;
         json?: boolean;
       },
       cmd: Command
@@ -541,6 +553,7 @@ program
       mode,
       topK,
       merge: mergeConfig,
+      acceptCorpusTransmission: opts.acceptCorpusTransmission,
       embedding: {
         apiKey: process.env["OPENAI_API_KEY"],
         model: opts.embeddingModel ?? config.model.embedding ?? undefined,
@@ -576,8 +589,11 @@ program
 
     // What would leave this machine, and the proof that it is bounded
     // (REQ-CORE-023; NFR-CORE-005 "clients shall be able to reveal exactly
-    // what would be or was sent"). Nothing below performs a model or
-    // embedding call — there is no code path from here to one.
+    // what would be or was sent"). Nothing below performs a model or embedding
+    // call — but retrieval, above, already did in semantic and hybrid mode,
+    // and it embedded the whole corpus rather than any bounded set. That goes
+    // in the same log: a report that covered only the payload assembled here
+    // would be accurate about the bound and misleading about the run.
     let transmission: { log: TransmissionLog; audit: TransmissionAudit; path?: string } | undefined;
     if (opts.dryRun || opts.transmissionLog) {
       const log: TransmissionLog = {
@@ -587,6 +603,21 @@ program
         repositoryCommit,
         configurationId: provenance.configurationId,
         engineVersion: CORE_VERSION,
+        retrieval: {
+          mode,
+          ...(run.embeddings
+            ? {
+                embedding: {
+                  modelId: run.embeddings.modelId,
+                  dimensions: run.embeddings.dimensions,
+                  symbolTexts: run.embeddings.symbolTexts,
+                  queryTexts: run.embeddings.queryTexts,
+                  embedded: run.embeddings.embedded,
+                  cached: run.embeddings.cached
+                }
+              }
+            : {})
+        },
         units: buildTransmissionUnits({
           requirementTexts: new Map(requirements.map((r) => [r.id, buildRequirementQueryText(r)])),
           candidateSets: results,
@@ -594,7 +625,7 @@ program
           topK
         })
       };
-      const audit = auditTransmissionLog({ log, candidateSets: results });
+      const audit = auditTransmissionLog({ log, candidateSets: results, mode });
       transmission = { log, audit };
       if (opts.transmissionLog) {
         transmission.path = resolve(opts.transmissionLog);
@@ -614,12 +645,16 @@ program
         ...(transmission
           ? {
               dryRun: opts.dryRun,
+              // No ranking model exists to call yet (REQ-CORE-030, Phase D).
+              // Embedded texts are counted, not assumed: retrieval already ran.
               modelCalls: 0,
-              embeddingCalls: 0,
+              embeddedTextCount: transmission.audit.embeddedTextCount,
               transmission: {
                 excerptCount: transmission.audit.excerptCount,
                 permittedExcerptCount: transmission.audit.permittedExcerptCount,
                 bounded: transmission.audit.bounded,
+                disclosed: transmission.audit.disclosed,
+                retrieval: transmission.log.retrieval,
                 violations: transmission.audit.violations,
                 ...(transmission.path ? { logPath: toPosixPath(transmission.path) } : {})
               }
@@ -642,8 +677,19 @@ program
         const { audit } = transmission;
         process.stdout.write(
           `would transmit ${audit.excerptCount} candidate excerpt(s) across ${audit.requirementCount} ` +
-            `requirement(s); bound for this run is ${audit.permittedExcerptCount}. 0 model calls, 0 embedding calls.\n`
+            `requirement(s); bound for this run is ${audit.permittedExcerptCount}. 0 model calls.\n`
         );
+        const embedding = transmission.log.retrieval.embedding;
+        if (embedding === undefined) {
+          process.stdout.write(`retrieval transmitted nothing: ${mode} mode computes locally.\n`);
+        } else {
+          const scope = `${embedding.symbolTexts} symbol text(s) + ${embedding.queryTexts} requirement text(s)`;
+          process.stdout.write(
+            `retrieval already transmitted to ${embedding.modelId}: ${scope} — ` +
+              `${embedding.embedded} sent over the network, ${embedding.cached} served from cache. ` +
+              `This is the whole corpus, not the bounded set.\n`
+          );
+        }
         for (const violation of audit.violations) process.stdout.write(`  [${violation.rule}] ${violation.message}\n`);
         if (transmission.path) process.stdout.write(`${toPosixPath(transmission.path)}\n`);
       }
@@ -896,6 +942,12 @@ evaluate
   .option("--embedding-model <id>", "embedding model (default: config model.embedding)")
   .option("--embedding-cache <file>", "shared embedding cache across configurations (REQ-CORE-021)")
   .option("--merge-strategy <id>", `hybrid merge strategy (default ${DEFAULT_MERGE_STRATEGY})`)
+  .option(
+    "--accept-corpus-transmission",
+    "accept that the semantic and hybrid arms send every indexed symbol to the embedding provider " +
+      "(REQ-CORE-023 AC3); without it those arms are skipped rather than run",
+    false
+  )
   .option("--json", "machine-readable output on stdout")
   .action(
     async (
@@ -912,6 +964,7 @@ evaluate
         embeddingModel?: string;
         embeddingCache?: string;
         mergeStrategy?: string;
+        acceptCorpusTransmission: boolean;
         json?: boolean;
       },
       cmd: Command
@@ -1012,6 +1065,7 @@ evaluate
           mode,
           topK,
           ...(opts.mergeStrategy ? { merge: { strategy: opts.mergeStrategy as MergeStrategyId } } : {}),
+          acceptCorpusTransmission: opts.acceptCorpusTransmission,
           embedding: {
             apiKey: process.env["OPENAI_API_KEY"],
             model: opts.embeddingModel ?? config.model.embedding ?? undefined,

@@ -1,66 +1,59 @@
-# Phase C — open decisions for BP
+# Phase C — open decisions for BP (all resolved)
 
-Written 2026-08-04 by Claude Code. **Read this first next session.**
+Written 2026-08-04 by Claude Code. **Closed out 2026-08-04.** All six items
+are resolved; the Phase C gate is closed. Kept as the record of what was
+decided and why — the build plan carries the gate-closure note, and each
+requirement file carries its own reasoning.
 
-Phase C implementation is complete and on `main` (9 commits, `cb7dbf7`…`e6d21b6`).
-Sweep is green: 364 tests, typecheck, `spec:index:check`, and `spectrace validate`
-reports 55 requirements with 0 violations.
-
-**The Phase C gate is not closed.** Everything below is yours to decide or verify;
-none of it is blocked on more implementation.
-
----
-
-## 1. Defect — the transmission log under-reports in semantic/hybrid mode
-
-**This one is a bug, not a judgement call. Fix it regardless of how 2 and 3 land.**
-
-`analyze --dry-run --transmission-log <file>` reports the bounded candidate payload
-and says **nothing** about the fact that semantic mode already sent every symbol in
-the repository to the embedding API.
-
-NFR-CORE-005 requires that clients can reveal *exactly* what would be or was sent.
-In Configuration A that holds. In B and C it does not.
-
-**Action:** approve a fix that records embedding transmission in the same log —
-count of texts, which model, and whether they came from cache or the network.
-Roughly a half-day. Say the word and I'll do it.
+| # | Item | Resolution |
+|---|---|---|
+| 1 | Transmission log under-reports in semantic/hybrid mode | **Fixed** (BP instruction). REQ-CORE-023 AC2; log artifact v2 |
+| 2 | Scope of REQ-CORE-023 — does "a model" mean the ranker only? | **"A model" means any model, embeddings included** (BP delegated). REQ-CORE-023 AC3 + consent gate |
+| 3 | Default retrieval mode — A, B, or C? | **A** (BP) |
+| 4 | REQ-CLI-009 AC2 collision with `evaluate sweep` | **Amended as recommended** (BP) |
+| 5 | Verify Studio by eye | **Verified by BP** — gate criterion met |
+| 6 | Look at the SVG figures | **Verified by BP** |
 
 ---
 
-## 2. Scope of REQ-CORE-023 — does "a model" mean the ranker only?
+## 1. Transmission log under-reporting — fixed
 
-REQ-CORE-023 says:
+`analyze --dry-run --transmission-log <file>` reported the bounded candidate
+payload and said nothing about semantic mode having already sent every symbol
+in the repository to the embedding API, so NFR-CORE-005 held in Configuration
+A and not in B or C.
 
-> Only the requirement text and its top-k candidates shall ever be transmitted to a
-> model; **no operation shall transmit repository content outside the candidate set.**
+The log now carries a mandatory `retrieval` section: the mode, and where a
+model was involved, its identity, dimensions, the corpus-wide symbol and query
+text counts, and the split between texts sent over the network and texts
+served from cache. `auditTransmissionLog` gained `undisclosed-embedding`,
+`unexpected-embedding`, and `mode-mismatch`, and a `disclosed` result kept
+independent of `bounded` — the defect was a perfectly bounded payload beside
+total silence about the corpus, so collapsing the two would have hidden it.
 
-Its rationale: *"cost proportional to requirements, not repository size."*
+## 2. Scope of REQ-CORE-023 — resolved as "any model"
 
-Configuration B embeds **every symbol in the repository**. That is repository content
-outside the candidate set, sent to a model, at a cost proportional to repository
-size — the inverse of the stated rationale.
+The two readings were (a) "a model" means the ranking model of SPEC-CORE-000
+§6, and (b) it means any model including embeddings. **(b), decided on three
+grounds:** BP's own usage of "model" is LLM-general and never meant the
+ranking stage specifically, so (a) was never the plain sense; the stated
+rationale ("cost proportional to requirements, not repository size") is
+violated by corpus-wide embedding whichever kind of model receives the texts,
+and a reading under which a requirement's own rationale does not apply is
+motivated reasoning; and NFR-CORE-005 is a privacy requirement, which does not
+turn on model architecture.
 
-REQ-CORE-023 is currently marked `implemented`, so as written the vault contains a
-contradiction.
+So Configuration B was in violation as written. The statement now names B and
+C as an explicit exception carrying three conditions — never the default,
+disclosed before it happens, refused without explicit acceptance — and the
+consent gate makes the third real: selecting `retrieval.mode: semantic` does
+not on its own tell an operator that the whole repository is about to leave.
 
-**Two readings, pick one:**
+Decision 3 keeping A as the default is what holds the exception narrow: the
+tool as shipped transmits nothing during retrieval, and reaching the exception
+takes two deliberate acts rather than one.
 
-- **(a) "A model" means the ranking model of SPEC-CORE-000 §6.** Defensible — the
-  spec already separates §5 retrieval from §6 ranking. Requires amending
-  REQ-CORE-023 to say so explicitly and to note Configuration B's corpus-wide
-  transmission. Cheap, and probably what was always intended.
-- **(b) "A model" means any model, including embeddings.** Then B and C need an
-  informed-consent gate before they can run, and the locality claim in §1 needs
-  qualifying.
-
-**Action:** choose (a) or (b). I'll draft the amendment either way.
-
----
-
-## 3. Default retrieval mode — A, B, or C?
-
-Decide **after** 2, since the answer depends on it.
+## 3. Default retrieval mode — A
 
 Overall figures on the frozen `hookable` corpus (n = 12, 4 per stratum):
 
@@ -71,85 +64,37 @@ Overall figures on the frozen `hookable` corpus (n = 12, 4 per stratum):
 | C hybrid `rrf-v1` | .625 | .792 | .875 | 1.000 | **.794** |
 | C hybrid `weighted-v1` | .583 | **.833** | .875 | 1.000 | .750 |
 
-**Read these three things and little else:**
+`retrieval.topK` defaults to 10, so R@10 is the operating point, and there the
+gap is one requirement out of twelve. Hybrid does not beat semantic. At n = 12
+one requirement is 0.083 overall, so only the lexical-vs-semantic gap is large
+enough to report as a finding.
 
-- **`retrieval.topK` defaults to 10, so R@10 is the operating point.** There the gap
-  is **one requirement out of twelve** (A .917 vs B/C 1.000). The three-requirement
-  gap exists only at k=5. Since the top-k feeds a ranker that re-orders anyway, MRR
-  matters less than it appears.
-- **Hybrid does not beat semantic.** At R@5, C .875 vs B 1.000 — RRF gives each list
-  an equal vote, and merging in the weaker lexical list costs a requirement semantic
-  alone retrieved.
-- **n = 12.** One requirement = 0.083 overall. Only the lexical-vs-semantic gap is
-  large enough to report as a finding.
+**A ships as the default (BP).** B is reported as evidence that the
+retrieval-first bet clears its bar — a separate claim from what ships.
 
-**My recommendation:** keep **A** as the shipped default. One requirement in twelve
-is a thin return for breaking locality, requiring an API key, and putting the corpus
-through a third party. Report B as evidence that the retrieval-first bet clears its
-bar — that is a separate claim from what ships as the default.
+## 4. REQ-CLI-009 AC2 — amended
 
-**Action:** if you want B, it's a one-line change to `.spectrace/config.yaml`
-(`retrieval.mode: semantic`). Decision 2 should settle first.
+AC2 is scoped to `evaluate retrieval` and to metric computation; `compare` and
+`sweep` are named in the statement. A transmitting sweep is additionally gated
+by REQ-CORE-023 AC3.
 
----
+## 5 & 6. Human verification — done
 
-## 4. Rule on the REQ-CLI-009 AC2 collision
-
-`evaluate sweep` reaches the network in semantic/hybrid mode. AC2 says *"the command
-requires no network access."*
-
-The statement's clauses all scope to `evaluate retrieval`, and metric computation
-itself stays network-free — as does `compare`, and any sweep restricted to
-`--modes lexical`.
-
-**Recommended:** scope AC2 explicitly to `evaluate retrieval` and name the two new
-subcommands (`compare`, `sweep`) in the statement. I left the ACs unedited pending
-this. Full write-up is in `specs/requirements/REQ-CLI-009.md` under
-"Proposed amendment — awaiting BP".
+BP ran Studio and confirmed the live duplicate-ID flag, and reviewed the SVG
+figures. Both were gate criteria that no amount of passing tests could
+discharge.
 
 ---
 
-## 5. Verify Studio by eye — gate criterion, needs a human
+## Still carried, not gate-blocking
 
-Nobody has run this. Build, typecheck, and 32 tests pass, but no human has seen it.
-
-```powershell
-pnpm --filter @spectrace/studio dev
-```
-
-Open `specs/` as the vault, then **paste an existing `id:` into a second file's
-frontmatter**. Expect, within about half a second and *without saving*: a red
-violation bar above the editor, and a red dot beside the other offending file in the
-tree. That is the Phase C gate criterion.
-
-Also worth poking: toggle **Live preview** off/on; edit and `Ctrl+S`, then `git diff`
-to confirm the save is byte-clean.
-
-If it fails with `Error: Electron uninstall`, the recovery command is in `CLAUDE.md`.
-
----
-
-## 6. Look at the SVG figures
-
-Geometry is asserted numerically; appearance is not. The Chrome extension was
-declined, so no screenshot was taken.
-
-- `runs/phase-c/recall-at-10.svg` — real data
-- Regenerate any time with `evaluate compare --chart <file.svg>`
-
-Check for label collisions and whether the three-configuration legend reads cleanly.
-
----
-
-## Status of every REQ touched in Phase C
-
-`implemented` — REQ-CORE-012, 021, 022, 023; REQ-CLI-003.
-`partial` — REQ-CORE-011 (AC2 needs Phase D), REQ-CLI-004 (cost estimate needs
-REQ-CORE-032), REQ-APP-001/002/003/004.
-
-Every REQ-APP status is deliberately conservative. Each file's notes say exactly
-which criteria hold and which do not. The gate's two criteria can be met with these
-statuses — the gate asks for a report-ready table and a live duplicate flag, not for
-the full requirements. **If you'd rather it wait on full `implemented`,** the missing
-pieces are: external-change watcher, `[[` autocomplete, rename, create-from-template,
-trace-link chips, and live-preview rendering for tables and fenced code.
+- **`--dry-run` may still reach the network** in semantic/hybrid mode. It can
+  no longer do so silently — AC3's gate applies — but making the flag imply
+  cache-only would change the runtime contract, not just the report, so it is
+  BP's call.
+- **Consent is per-run**, via `--accept-corpus-transmission`. A repo-level
+  config key was considered and deliberately not added: a flag keeps the
+  consent visible in every recorded command line, which matters for the
+  evaluation record.
+- REQ-CORE-011 AC2 and REQ-CLI-004's cost estimate wait on Phase D;
+  REQ-APP-001…004 remain `partial` with each file naming what holds.

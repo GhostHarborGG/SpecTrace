@@ -23,15 +23,28 @@
  * the fact rather than only by inspection, and what lets clients show a user
  * exactly what would be or was sent (NFR-CORE-005).
  *
+ * **The bounded payload is not the only thing a run transmits.** Retrieval
+ * itself transmits in Configurations B and C: semantic and hybrid retrieval
+ * embed every symbol in the repository, which is corpus-wide and therefore
+ * outside the bound this module enforces. A log that reported only the
+ * bounded payload would satisfy AC1 while leaving a reader with a materially
+ * false picture of what left the machine, so {@link TransmissionLog} carries
+ * a {@link RetrievalTransmission} record alongside the units and the audit
+ * treats its absence in a transmitting mode as a violation. Disclosing that
+ * transmission is a separate question from whether REQ-CORE-023's bound is
+ * meant to cover it — the log states the fact either way.
+ *
  * No model call lives here. Ranking (REQ-CORE-030, Phase D) consumes these
  * units; it does not assemble its own.
  */
 
+import type { RetrievalMode } from "../config/types.js";
 import type { CodeSymbol } from "../indexer/types.js";
 import type { CandidateSet } from "../retrieval/retrieve.js";
 
 export const TRANSMISSION_LOG_ARTIFACT = "spectrace.transmitted-content";
-export const TRANSMISSION_LOG_VERSION = 1;
+/** 2 added the mandatory `retrieval` section; a v1 log cannot describe Configuration B or C honestly. */
+export const TRANSMISSION_LOG_VERSION = 2;
 
 /** Per-field character budgets. Chosen to bound payload size, not to fit any particular model's context. */
 export interface ExcerptBudget {
@@ -76,6 +89,44 @@ export interface TransmissionUnit {
   candidates: CandidateExcerpt[];
 }
 
+/**
+ * What retrieval sent to an embedding model, which in Configurations B and C
+ * is the whole corpus rather than any bounded set.
+ *
+ * Counts are of *texts*, not requests: batching is a transport detail, and a
+ * reader asking "what left this machine" is asking how much content, not how
+ * many HTTP calls. `embedded` is the number that went to the provider over
+ * the network this run; `cached` is the number resolved from the local vector
+ * cache, which by definition did not leave the machine this run — though it
+ * did on the run that populated the cache, which is why the model is named
+ * even when `embedded` is zero.
+ */
+export interface EmbeddingTransmission {
+  /** The embedding model the texts went to, from the provider or the cache header. */
+  modelId: string;
+  dimensions: number;
+  /** Symbol texts this run required — one per indexed symbol, so: corpus-wide. */
+  symbolTexts: number;
+  /** Requirement query texts this run required. */
+  queryTexts: number;
+  /** Texts sent to the provider over the network this run. */
+  embedded: number;
+  /** Texts served from the local vector cache, so not transmitted this run. */
+  cached: number;
+}
+
+/**
+ * What retrieval transmitted, as distinct from what the bounded payload would
+ * transmit to a ranking model.
+ *
+ * `embedding` is absent in lexical mode, which computes entirely locally and
+ * so has nothing to disclose.
+ */
+export interface RetrievalTransmission {
+  mode: RetrievalMode;
+  embedding?: EmbeddingTransmission;
+}
+
 export interface TransmissionLog {
   artifact: typeof TRANSMISSION_LOG_ARTIFACT;
   version: number;
@@ -84,6 +135,8 @@ export interface TransmissionLog {
   repositoryCommit: string;
   configurationId: string;
   engineVersion: string;
+  /** What retrieval itself transmitted before any payload was assembled. */
+  retrieval: RetrievalTransmission;
   units: TransmissionUnit[];
 }
 
@@ -97,6 +150,51 @@ export interface BuildTransmissionOptions {
   /** Bound retained per requirement; candidate lists longer than this are truncated. */
   topK: number;
   budget?: Partial<ExcerptBudget>;
+}
+
+/**
+ * Whether a retrieval configuration sends the whole corpus to a model.
+ *
+ * Semantic and hybrid retrieval embed every indexed symbol (REQ-CORE-021,
+ * REQ-CORE-022), which is repository content outside any candidate set.
+ * Exported so every client asks the same question the same way: a Studio that
+ * decided "hybrid is mostly lexical, close enough" would put a hole in the
+ * consent gate REQ-CORE-023 AC3 requires.
+ */
+export function transmitsCorpusWide(mode: RetrievalMode): boolean {
+  return mode === "semantic" || mode === "hybrid";
+}
+
+export interface CorpusTransmissionConsent {
+  mode: RetrievalMode;
+  /**
+   * Texts that would go to the provider over the network. Zero when every
+   * vector is already cached, which is why a fully cached run is not gated:
+   * consent is about content leaving the machine, not about configuration.
+   */
+  pendingTextCount: number;
+  /** Whether the operator has explicitly accepted corpus-wide transmission for this run. */
+  acknowledged: boolean;
+}
+
+/**
+ * Whether a run must be refused pending explicit acceptance (REQ-CORE-023 AC3).
+ *
+ * The bound in REQ-CORE-023 covers any model, embedding models included
+ * (decided 2026-08-04, BP delegated), so Configurations B and C are a
+ * documented exception rather than an oversight — and an exception is only
+ * meaningful if choosing it is a deliberate act. Selecting `retrieval.mode:
+ * semantic` does not on its own tell an operator that every symbol in the
+ * repository is about to be sent to a third party; this is what makes that
+ * consequence something they have to accept rather than discover.
+ *
+ * A pure predicate rather than a check buried in a command, so the matrix it
+ * defines is testable without a network and identical across clients.
+ */
+export function requiresCorpusTransmissionConsent(check: CorpusTransmissionConsent): boolean {
+  if (!transmitsCorpusWide(check.mode)) return false;
+  if (check.pendingTextCount <= 0) return false;
+  return !check.acknowledged;
 }
 
 /** A candidate ID with no matching indexed symbol — a stale index, not a transmission fault. */
@@ -151,9 +249,23 @@ export interface TransmissionAudit {
   /** The maximum this run was permitted: sum over requirements of min(k, retrieved). */
   permittedExcerptCount: number;
   requirementCount: number;
+  /**
+   * Texts retrieval sent to an embedding model over the network this run, from
+   * the log's own disclosure. Zero in lexical mode and on a fully cached run —
+   * and, note, also zero for a semantic run that failed to disclose, which is
+   * what `disclosed` is for.
+   */
+  embeddedTextCount: number;
   violations: TransmissionViolation[];
   /** True when nothing outside the bound was transmitted (REQ-CORE-023 AC1). */
   bounded: boolean;
+  /**
+   * True when the log accounts for everything the run transmitted, including
+   * retrieval-time embedding (NFR-CORE-005). Independent of `bounded`: a log
+   * can carry a perfectly bounded payload and still be silent about having
+   * embedded the corpus, which is exactly the defect this check exists for.
+   */
+  disclosed: boolean;
 }
 
 export type TransmissionViolationRule =
@@ -162,11 +274,15 @@ export type TransmissionViolationRule =
   | "unknown-requirement"
   | "duplicate-requirement"
   | "missing-requirement"
-  | "oversized-field";
+  | "oversized-field"
+  | "undisclosed-embedding"
+  | "unexpected-embedding"
+  | "mode-mismatch";
 
 export interface TransmissionViolation {
   rule: TransmissionViolationRule;
-  requirementId: string;
+  /** Absent on log-level violations, which concern the run rather than one requirement. */
+  requirementId?: string;
   message: string;
   symbolId?: string;
 }
@@ -175,12 +291,19 @@ export interface AuditOptions {
   log: TransmissionLog;
   /** The retrieval output the log claims to describe. */
   candidateSets: readonly CandidateSet[];
+  /**
+   * The mode the run actually used. Supplied, the audit checks the log's own
+   * account against it; omitted, the log is taken at its word about the mode
+   * and only checked for internal consistency.
+   */
+  mode?: RetrievalMode;
   budget?: Partial<ExcerptBudget>;
 }
 
 /**
  * Re-derives what a run was permitted to transmit and reports everything the
- * log carries beyond it (REQ-CORE-023 AC1).
+ * log carries beyond it (REQ-CORE-023 AC1), plus everything the run
+ * transmitted that the log fails to account for (NFR-CORE-005).
  *
  * Reports all violations in one pass rather than throwing on the first, so a
  * client can show a reviewer the whole picture — the same convention the
@@ -277,14 +400,51 @@ export function auditTransmissionLog(options: AuditOptions): TransmissionAudit {
     }
   }
 
+  // Retrieval-time transmission. Semantic and hybrid retrieval embed every
+  // symbol in the corpus; a log that omits that is silent about the largest
+  // thing the run sent, which is the failure NFR-CORE-005 forbids.
+  const { retrieval } = log;
+  const transmittingMode = transmitsCorpusWide(retrieval.mode);
+
+  if (options.mode !== undefined && options.mode !== retrieval.mode) {
+    violations.push({
+      rule: "mode-mismatch",
+      message: `The log describes a ${retrieval.mode} run, but the run was ${options.mode}.`
+    });
+  }
+  if (transmittingMode && retrieval.embedding === undefined) {
+    violations.push({
+      rule: "undisclosed-embedding",
+      message:
+        `A ${retrieval.mode} run embeds every indexed symbol, but the log records no embedding ` +
+        `transmission. Clients cannot reveal what was sent (NFR-CORE-005).`
+    });
+  }
+  if (!transmittingMode && retrieval.embedding !== undefined) {
+    violations.push({
+      rule: "unexpected-embedding",
+      message: `The log records embedding transmission for a ${retrieval.mode} run, which computes locally.`
+    });
+  }
+
+  const disclosureRules: TransmissionViolationRule[] = [
+    "undisclosed-embedding",
+    "unexpected-embedding",
+    "mode-mismatch"
+  ];
+
   return {
     excerptCount,
     permittedExcerptCount,
     requirementCount: log.units.length,
+    embeddedTextCount: retrieval.embedding?.embedded ?? 0,
     violations,
     // A log that omits a requirement is incomplete, but it did not transmit
-    // anything it should not have — boundedness is about excess only.
-    bounded: !violations.some((v) => v.rule !== "missing-requirement")
+    // anything it should not have — boundedness is about excess only. Nor do
+    // the disclosure rules bear on it: they concern retrieval, which is not
+    // what the (requirements × ≤k) bound governs.
+    bounded: !violations.some((v) => v.rule !== "missing-requirement" && !disclosureRules.includes(v.rule)),
+    disclosed: !violations.some((v) => disclosureRules.includes(v.rule))
   };
 }
 

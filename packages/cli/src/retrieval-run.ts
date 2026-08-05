@@ -17,11 +17,14 @@ import { dirname } from "node:path";
 import {
   DEFAULT_MERGE_STRATEGY,
   EmbeddingCache,
+  embeddingKey,
   mergeCandidateSets,
   mergePoolSize,
+  requiresCorpusTransmissionConsent,
   retrieveCandidates,
   retrieveSemanticCandidates,
   serializeEmbeddingCache,
+  symbolEmbeddingText,
   type CandidateSet,
   type CodeSymbol,
   type MergeConfig,
@@ -85,10 +88,49 @@ export interface RetrievalRunOptions {
   topK: number;
   merge?: MergeConfig;
   embedding?: EmbeddingRunOptions;
+  /**
+   * The operator has accepted that this configuration sends every indexed
+   * symbol to a third party (REQ-CORE-023 AC3). Absent, a run that would
+   * transmit is refused rather than performed.
+   */
+  acceptCorpusTransmission?: boolean;
 }
 
+/**
+ * How many distinct texts this run would have to send, given what the cache
+ * already holds.
+ *
+ * Deduplicated by embedding key, matching what `retrieveSemanticCandidates`
+ * will actually do, so the number quoted to the operator is the number that
+ * would leave — not an upper bound that overstates the ask and trains them to
+ * wave it through.
+ */
+function countUncachedTexts(options: RetrievalRunOptions, cache: EmbeddingCache | undefined): number {
+  const pending = new Set<string>();
+  const texts = [...options.symbols.map(symbolEmbeddingText), ...options.queries.map((q) => q.text)];
+  for (const text of texts) {
+    const key = embeddingKey(text);
+    if (cache?.get(key) === undefined) pending.add(key);
+  }
+  return pending.size;
+}
+
+/**
+ * What the run sent to an embedding model. Carries the model identity and the
+ * corpus-wide text counts, not just the tallies, because this is what a
+ * transmitted-content log is assembled from (REQ-CORE-023, NFR-CORE-005) — a
+ * disclosure that said "embedded 412 texts" without naming the model or the
+ * scope would not let a reader tell what actually left the machine.
+ */
 export interface EmbeddingRunReport {
+  modelId: string;
+  dimensions: number;
+  /** One per indexed symbol: semantic and hybrid retrieval embed the whole corpus. */
+  symbolTexts: number;
+  queryTexts: number;
+  /** Texts sent to the provider over the network this run. */
   embedded: number;
+  /** Texts served from the local cache, so not transmitted this run. */
   cached: number;
   cachePath?: string;
 }
@@ -174,6 +216,33 @@ export async function runRetrieval(options: RetrievalRunOptions): Promise<Retrie
     }
   }
 
+  // The consent gate (REQ-CORE-023 AC3). Only a network-capable run can reach
+  // it: the cache-only provider cannot transmit at all, so gating it would ask
+  // for permission to do nothing and would break offline reproduction of a
+  // recorded run. A run whose every vector is cached is likewise not gated —
+  // consent is about content leaving the machine, not about configuration.
+  const pendingTextCount = cacheOnly ? 0 : countUncachedTexts(options, cache);
+  if (
+    requiresCorpusTransmissionConsent({
+      mode: options.mode,
+      pendingTextCount,
+      acknowledged: options.acceptCorpusTransmission === true
+    })
+  ) {
+    return {
+      ok: false,
+      error: "corpus_transmission_not_accepted",
+      message:
+        `Retrieval mode "${options.mode}" embeds every indexed symbol, not just the top-k candidates: ` +
+        `this run would send ${pendingTextCount} text(s) — ${options.symbols.length} symbol(s) and ` +
+        `${options.queries.length} requirement(s), minus what the cache already holds — to ${provider.modelId}. ` +
+        `That is repository content outside the candidate set (REQ-CORE-023). Pass ` +
+        `--accept-corpus-transmission to proceed, use --embedding-cache with a cache covering this corpus ` +
+        `to send nothing, or stay on the default lexical mode, which transmits nothing.`,
+      exitCode: 2
+    };
+  }
+
   let semantic;
   try {
     semantic = await retrieveSemanticCandidates({
@@ -194,6 +263,10 @@ export async function runRetrieval(options: RetrievalRunOptions): Promise<Retrie
   }
 
   const embeddings: EmbeddingRunReport = {
+    modelId: provider.modelId,
+    dimensions: provider.dimensions,
+    symbolTexts: options.symbols.length,
+    queryTexts: options.queries.length,
     embedded: semantic.embeddedCount,
     cached: semantic.cachedCount
   };

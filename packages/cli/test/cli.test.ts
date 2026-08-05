@@ -4,6 +4,14 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  EmbeddingCache,
+  embeddingKey,
+  serializeEmbeddingCache,
+  symbolEmbeddingText,
+  type CodeSymbol
+} from "@spectrace/core";
+import { buildRequirementQueryText, loadRequirements } from "../src/requirements.js";
 
 const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "index.ts");
 
@@ -426,17 +434,27 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     run(["index", "--repo", repo, "--rebuild"]);
   });
 
-  it("bounds a dry run to (requirements × ≤k) excerpts and calls no model (REQ-CORE-023 AC1, REQ-CLI-004 AC3)", () => {
-    run(["index", "--repo", repo, "--rebuild"]);
-    const requirements = path.join(repo, "bounded-reqs");
-    mkdirSync(requirements, { recursive: true });
+  /**
+   * The two-requirement fixture the transmission tests share. Written by
+   * whichever test runs first rather than by one of them, so no test in this
+   * group depends on another having run — `vitest -t` filters freely.
+   */
+  const boundedRequirements = (): string => {
+    const dir = path.join(repo, "bounded-reqs");
+    mkdirSync(dir, { recursive: true });
     for (const [id, title] of [["R-1", "Addition"], ["R-2", "Area"]] as const) {
       writeFileSync(
-        path.join(requirements, `${id}.md`),
+        path.join(dir, `${id}.md`),
         `---\nid: ${id}\ntitle: ${title}\nstatus: proposed\ndifficulty: high-overlap\n` +
           `acceptance_criteria:\n  - It works.\n---\n\n## Statement\n\nThe system shall compute the ${title.toLowerCase()}.\n`
       );
     }
+    return dir;
+  };
+
+  it("bounds a dry run to (requirements × ≤k) excerpts and calls no model (REQ-CORE-023 AC1, REQ-CLI-004 AC3)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
     const logPath = path.join(repo, "transmission.json");
 
     const { stdout, status } = run([
@@ -453,7 +471,11 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     const report = JSON.parse(stdout);
     expect(report.dryRun).toBe(true);
     expect(report.modelCalls).toBe(0);
-    expect(report.embeddingCalls).toBe(0);
+    expect(report.embeddedTextCount).toBe(0);
+    // Lexical really does transmit nothing, and the log says so rather than
+    // staying silent — silence is what a semantic run must not get away with.
+    expect(report.transmission.disclosed).toBe(true);
+    expect(report.transmission.retrieval).toEqual({ mode: "lexical" });
     expect(report.transmission.bounded).toBe(true);
     expect(report.transmission.violations).toEqual([]);
     expect(report.transmission.excerptCount).toBe(report.transmission.permittedExcerptCount);
@@ -470,11 +492,118 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     expect(log.units.reduce((n: number, u: { candidates: unknown[] }) => n + u.candidates.length, 0)).toBe(
       report.transmission.excerptCount
     );
+    expect(log.retrieval).toEqual({ mode: "lexical" });
     rmSync(logPath);
   });
 
+  it("discloses the corpus-wide embedding a semantic run performs (REQ-CORE-023 AC2, NFR-CORE-005)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+    const logPath = path.join(repo, "semantic-transmission.json");
+    const cachePath = path.join(repo, "embeddings.json");
+
+    // Every text this run needs, pre-cached, so the assertion is about what the
+    // log reports rather than about reaching OpenAI. The counts are unaffected:
+    // cache or network, the corpus is what the configuration embeds.
+    const symbols = readFileSync(indexPath, "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line))
+      .filter((entry): entry is CodeSymbol => typeof entry.symbolId === "string");
+    const queries = loadRequirements(requirements).requirements.map(buildRequirementQueryText);
+    const cache = new EmbeddingCache("test-model", 4);
+    [...symbols.map(symbolEmbeddingText), ...queries].forEach((text, i) => {
+      cache.set(embeddingKey(text), Array.from({ length: 4 }, (_, d) => (d === i % 4 ? 1 : 0)));
+    });
+    writeFileSync(cachePath, serializeEmbeddingCache(cache.toFile({ prune: false })), "utf8");
+
+    const { stdout, status } = run(
+      [
+        "analyze",
+        "--requirements", requirements,
+        "--index", indexPath,
+        "--top-k", "3",
+        "--mode", "semantic",
+        "--embedding-cache", cachePath,
+        "--dry-run",
+        "--transmission-log", logPath,
+        "--json"
+      ],
+      envWithoutApiKey()
+    );
+    expect(status).toBe(0);
+
+    const report = JSON.parse(stdout);
+    expect(report.transmission.disclosed).toBe(true);
+    expect(report.transmission.bounded).toBe(true);
+    expect(report.transmission.violations).toEqual([]);
+
+    const { retrieval } = JSON.parse(readFileSync(logPath, "utf8"));
+    expect(retrieval.mode).toBe("semantic");
+    expect(retrieval.embedding.modelId).toBe("test-model");
+    // The number the old log omitted entirely: every indexed symbol, which is
+    // the corpus, not the (requirements × ≤k) bound the units are held to.
+    expect(retrieval.embedding.symbolTexts).toBe(symbols.length);
+    expect(retrieval.embedding.symbolTexts).toBeGreaterThan(report.transmission.excerptCount);
+    expect(retrieval.embedding.queryTexts).toBe(2);
+    expect(retrieval.embedding.embedded + retrieval.embedding.cached).toBe(symbols.length + 2);
+    // Served from cache this run, so nothing crossed the network — and the
+    // report says which, rather than leaving a reader to assume.
+    expect(retrieval.embedding.embedded).toBe(0);
+    expect(report.embeddedTextCount).toBe(0);
+
+    rmSync(logPath);
+    rmSync(cachePath);
+  });
+
+  it("refuses a semantic run whose corpus transmission was never accepted (REQ-CORE-023 AC3)", () => {
+    const requirements = boundedRequirements();
+    const { stderr, status } = run(
+      [
+        "analyze",
+        "--requirements", requirements,
+        "--index", indexPath,
+        "--mode", "semantic",
+        "--json"
+      ],
+      { ...envWithoutApiKey(), OPENAI_API_KEY: "sk-test-not-used" }
+    );
+
+    expect(status).toBe(2);
+    const report = JSON.parse(stderr);
+    expect(report.error).toBe("corpus_transmission_not_accepted");
+    expect(report.message).toContain("--accept-corpus-transmission");
+    // Names the cheaper ways out, so the flag is not the path of least resistance.
+    expect(report.message).toContain("--embedding-cache");
+    expect(report.message).toContain("lexical");
+  });
+
+  it("leaves the default configuration ungated, because it transmits nothing (REQ-CORE-023 AC3)", () => {
+    const requirements = boundedRequirements();
+    const { status } = run(
+      ["analyze", "--requirements", requirements, "--index", indexPath, "--dry-run", "--json"],
+      { ...envWithoutApiKey(), OPENAI_API_KEY: "sk-test-not-used" }
+    );
+    expect(status).toBe(0);
+  });
+
+  it("says in plain output that retrieval already sent the corpus (NFR-CORE-005)", () => {
+    const requirements = boundedRequirements();
+    const { stdout } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--dry-run"
+    ]);
+    expect(stdout).toContain("0 model calls");
+    expect(stdout).toContain("lexical mode computes locally");
+    // The old wording asserted something the semantic path made false.
+    expect(stdout).not.toContain("0 embedding calls");
+  });
+
   it("restricts a run to --req and rejects an unknown one (REQ-CLI-004 AC1)", () => {
-    const requirements = path.join(repo, "bounded-reqs");
+    const requirements = boundedRequirements();
     const restricted = JSON.parse(
       run([
         "analyze",
@@ -500,7 +629,7 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     const { stderr, status } = run(
       [
         "analyze",
-        "--requirements", path.join(repo, "bounded-reqs"),
+        "--requirements", boundedRequirements(),
         "--index", indexPath,
         "--mode", "semantic"
       ],
@@ -521,7 +650,7 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
   });
 
   it("takes mode and k from configuration alone, with flags as overrides (REQ-CORE-022 AC1)", () => {
-    const requirements = path.join(repo, "bounded-reqs");
+    const requirements = boundedRequirements();
     const configPath = path.join(repo, ".spectrace", "config.yaml");
     mkdirSync(path.dirname(configPath), { recursive: true });
 
@@ -565,7 +694,7 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
   });
 
   it("rejects an unknown merge strategy and an out-of-range alpha", () => {
-    const requirements = path.join(repo, "bounded-reqs");
+    const requirements = boundedRequirements();
     const base = ["analyze", "--requirements", requirements, "--index", indexPath, "--mode", "lexical"];
     expect(run([...base, "--merge-strategy", "vibes"]).status).toBe(2);
     expect(run([...base, "--alpha", "1.5"]).status).toBe(2);

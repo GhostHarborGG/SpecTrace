@@ -6,9 +6,12 @@ import {
   UnresolvedCandidateError,
   auditTransmissionLog,
   buildTransmissionUnits,
+  requiresCorpusTransmissionConsent,
   serializeTransmissionLog,
+  transmitsCorpusWide,
   type TransmissionLog
 } from "../src/transmission/bounded-payload.js";
+import { DEFAULT_CONFIG } from "../src/config/types.js";
 import type { CandidateSet } from "../src/retrieval/retrieve.js";
 import type { CodeSymbol } from "../src/indexer/types.js";
 
@@ -46,7 +49,11 @@ function run(requirementId: string, count: number): { symbols: CodeSymbol[]; set
   };
 }
 
-function logOf(units: TransmissionLog["units"], topK: number): TransmissionLog {
+function logOf(
+  units: TransmissionLog["units"],
+  topK: number,
+  retrieval: TransmissionLog["retrieval"] = { mode: "lexical" }
+): TransmissionLog {
   return {
     artifact: TRANSMISSION_LOG_ARTIFACT,
     version: TRANSMISSION_LOG_VERSION,
@@ -54,9 +61,23 @@ function logOf(units: TransmissionLog["units"], topK: number): TransmissionLog {
     repositoryCommit: COMMIT,
     configurationId: "bm25f-v5",
     engineVersion: "0.1.0",
+    retrieval,
     units
   };
 }
+
+/** A disclosure as a real semantic run leaves it: the whole corpus, plus the queries. */
+const EMBEDDED_CORPUS: TransmissionLog["retrieval"] = {
+  mode: "semantic",
+  embedding: {
+    modelId: "text-embedding-3-small",
+    dimensions: 1536,
+    symbolTexts: 412,
+    queryTexts: 12,
+    embedded: 424,
+    cached: 0
+  }
+};
 
 describe("buildTransmissionUnits — the bound (REQ-CORE-023)", () => {
   it("transmits the requirement text and at most k candidate excerpts", () => {
@@ -316,6 +337,165 @@ describe("auditTransmissionLog — AC1: exactly (requirements × ≤k) excerpts 
   });
 });
 
+describe("auditTransmissionLog — retrieval-time transmission (REQ-CORE-023 AC2, NFR-CORE-005)", () => {
+  /** A clean, correctly bounded payload — so every result below is about disclosure alone. */
+  function boundedRun(): { units: TransmissionLog["units"]; candidateSets: CandidateSet[] } {
+    const { symbols, set } = run("R-1", 3);
+    return {
+      units: buildTransmissionUnits({
+        requirementTexts: new Map([["R-1", "text"]]),
+        candidateSets: [set],
+        symbols,
+        topK: 5
+      }),
+      candidateSets: [set]
+    };
+  }
+
+  it("accepts a lexical log that discloses nothing, because lexical transmits nothing", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({ log: logOf(units, 5), candidateSets, mode: "lexical" });
+    expect(audit.violations).toEqual([]);
+    expect(audit.disclosed).toBe(true);
+    expect(audit.embeddedTextCount).toBe(0);
+  });
+
+  it("accepts a semantic log that names the model and counts the corpus it embedded", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, EMBEDDED_CORPUS),
+      candidateSets,
+      mode: "semantic"
+    });
+    expect(audit.violations).toEqual([]);
+    expect(audit.disclosed).toBe(true);
+    expect(audit.embeddedTextCount).toBe(424);
+  });
+
+  it("flags a semantic log that is silent about having embedded the corpus", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, { mode: "semantic" }),
+      candidateSets,
+      mode: "semantic"
+    });
+    expect(audit.violations.map((v) => v.rule)).toEqual(["undisclosed-embedding"]);
+    expect(audit.disclosed).toBe(false);
+    // The defect this exists for: a bounded payload is not a complete account.
+    expect(audit.bounded).toBe(true);
+  });
+
+  it("flags a silent hybrid log too — merging a lexical list in does not undo the embedding", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, { mode: "hybrid" }),
+      candidateSets,
+      mode: "hybrid"
+    });
+    expect(audit.violations.map((v) => v.rule)).toEqual(["undisclosed-embedding"]);
+    expect(audit.disclosed).toBe(false);
+  });
+
+  it("flags a lexical log claiming an embedding transmission that cannot have happened", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, { ...EMBEDDED_CORPUS, mode: "lexical" }),
+      candidateSets,
+      mode: "lexical"
+    });
+    expect(audit.violations.map((v) => v.rule)).toEqual(["unexpected-embedding"]);
+    expect(audit.disclosed).toBe(false);
+  });
+
+  it("flags a log that reports a different mode than the run used", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({ log: logOf(units, 5), candidateSets, mode: "semantic" });
+    expect(audit.violations.map((v) => v.rule)).toContain("mode-mismatch");
+    expect(audit.disclosed).toBe(false);
+  });
+
+  it("takes the log at its word about the mode when the run's mode is not supplied", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({ log: logOf(units, 5, EMBEDDED_CORPUS), candidateSets });
+    expect(audit.violations).toEqual([]);
+    expect(audit.disclosed).toBe(true);
+  });
+
+  it("counts a fully cached run as disclosed with nothing sent this run", () => {
+    const { units, candidateSets } = boundedRun();
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, {
+        mode: "semantic",
+        embedding: { ...EMBEDDED_CORPUS.embedding!, embedded: 0, cached: 424 }
+      }),
+      candidateSets,
+      mode: "semantic"
+    });
+    expect(audit.violations).toEqual([]);
+    expect(audit.embeddedTextCount).toBe(0);
+  });
+
+  it("keeps excess and disclosure independent — an unbounded payload can still be disclosed", () => {
+    const { symbols, set } = run("R-1", 20);
+    const units = buildTransmissionUnits({
+      requirementTexts: new Map([["R-1", "text"]]),
+      candidateSets: [set],
+      symbols,
+      topK: 8
+    });
+    const audit = auditTransmissionLog({
+      log: logOf(units, 5, EMBEDDED_CORPUS),
+      candidateSets: [set],
+      mode: "semantic"
+    });
+    expect(audit.bounded).toBe(false);
+    expect(audit.disclosed).toBe(true);
+  });
+});
+
+describe("corpus-wide transmission consent (REQ-CORE-023 AC3)", () => {
+  it("names semantic and hybrid as the configurations that send the whole corpus", () => {
+    expect(transmitsCorpusWide("lexical")).toBe(false);
+    expect(transmitsCorpusWide("semantic")).toBe(true);
+    // Hybrid embeds exactly as much as semantic does; merging a locally
+    // computed list in afterwards transmits nothing back.
+    expect(transmitsCorpusWide("hybrid")).toBe(true);
+  });
+
+  it("never gates the default configuration, which transmits nothing", () => {
+    expect(DEFAULT_CONFIG.retrieval.mode).toBe("lexical");
+    expect(
+      requiresCorpusTransmissionConsent({
+        mode: DEFAULT_CONFIG.retrieval.mode,
+        pendingTextCount: 500,
+        acknowledged: false
+      })
+    ).toBe(false);
+  });
+
+  it("refuses an unaccepted run that would send texts", () => {
+    for (const mode of ["semantic", "hybrid"] as const) {
+      expect(requiresCorpusTransmissionConsent({ mode, pendingTextCount: 1, acknowledged: false })).toBe(true);
+    }
+  });
+
+  it("allows an accepted run", () => {
+    expect(
+      requiresCorpusTransmissionConsent({ mode: "semantic", pendingTextCount: 424, acknowledged: true })
+    ).toBe(false);
+  });
+
+  it("does not gate a run with nothing left to send, accepted or not", () => {
+    // Consent is about content leaving the machine. A fully cached run sends
+    // nothing, so demanding permission for it would train an operator to wave
+    // the prompt through — and would break offline reproduction of a recorded
+    // run, which is exactly what REQ-CORE-021 AC1 makes possible.
+    expect(
+      requiresCorpusTransmissionConsent({ mode: "semantic", pendingTextCount: 0, acknowledged: false })
+    ).toBe(false);
+  });
+});
+
 describe("transmission log artifact", () => {
   it("serializes to stable, versioned JSON with no timestamp", () => {
     const { symbols, set } = run("R-1", 3);
@@ -326,7 +506,8 @@ describe("transmission log artifact", () => {
         symbols,
         topK: 5
       }),
-      5
+      5,
+      EMBEDDED_CORPUS
     );
     const text = serializeTransmissionLog(log);
     expect(serializeTransmissionLog(log)).toBe(text);
@@ -334,5 +515,8 @@ describe("transmission log artifact", () => {
     expect(parsed.artifact).toBe(TRANSMISSION_LOG_ARTIFACT);
     expect(parsed.version).toBe(TRANSMISSION_LOG_VERSION);
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    // The disclosure is part of the written artifact, not a console nicety —
+    // a reader with only this file can tell what left the machine.
+    expect(parsed.retrieval).toEqual(EMBEDDED_CORPUS);
   });
 });

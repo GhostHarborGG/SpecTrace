@@ -41,6 +41,15 @@ detects when linked artifacts drift out of agreement. It operates locally,
 sends only bounded candidate sets to a language model, and accepts no link
 without human confirmation.
 
+That locality claim holds exactly as far as the default configuration, which
+is lexical retrieval (Configuration A) and transmits nothing while
+retrieving. The semantic and hybrid configurations embed every indexed
+symbol, so choosing one sends the repository's symbol text to an embedding
+provider — corpus-wide, and outside the bound of §5. They are opt-in,
+disclosed before they run, and refused without the operator's explicit
+acceptance (REQ-CORE-023), but they are a real qualification of "operates
+locally" and are stated here rather than left to be discovered.
+
 **In scope:** requirement schema and validation; templates; configuration;
 repository indexing and exclusions; lexical, semantic, and hybrid candidate
 retrieval; LLM-assisted ranking; human review and confidence bands;
@@ -235,9 +244,26 @@ it resolves candidates *through* each requirement's retrieved set, so a symbol
 outside that set cannot enter a payload; and every field is length-budgeted,
 so size scales with (requirements × k) and not with any one file. The
 companion audit re-derives what a run was permitted to send and reports the
-excess, which is what makes the guarantee checkable after the fact and what
-lets a client show a reviewer exactly what would be or was sent
-(NFR-CORE-005). Ranking consumes these payloads; it does not build its own.
+excess, which is what makes the guarantee checkable after the fact. Ranking
+consumes these payloads; it does not build its own.
+
+**The payload is not the only transmission.** Retrieval runs first, and in
+Configurations B and C it embeds every symbol in the repository — corpus-wide,
+and so outside the bound the gate enforces. A log covering only the payload
+would be accurate about the bound and misleading about the run, so the
+transmitted-content log carries retrieval's own account alongside it: the
+mode, and where a model was involved, its identity and the split between
+texts sent over the network and texts served from the local cache. The audit
+reports a transmitting mode that discloses nothing as a violation, which is
+what "clients shall be able to reveal exactly what would be or was sent"
+(NFR-CORE-005) requires when retrieval itself is one of the senders.
+
+The bound covers **any** model, embedding models included (decided
+2026-08-04). Configurations B and C are therefore an explicit exception
+rather than an oversight, and the exception carries conditions: it is never
+the default, it is disclosed before it happens, and a run that would transmit
+is refused until the operator accepts it. Configuration A ships as the
+default, so the tool as delivered transmits nothing during retrieval at all.
 
 ## 6. LLM ranking
 
@@ -365,8 +391,11 @@ the evaluation and echoed in dry-run estimates. *(P0)*
 feasibility-experiment measurements. *(P1)*
 
 **NFR-CORE-005 — Privacy of transmitted content.** Only requirement text and
-candidate excerpts are transmitted (REQ-CORE-023); clients shall be able to
-reveal exactly what would be or was sent. *(P0)*
+candidate excerpts are transmitted, except under the opt-in corpus-wide
+retrieval configurations, which transmit every indexed symbol's text and are
+gated on explicit acceptance (REQ-CORE-023); clients shall be able to reveal
+exactly what would be or was sent, retrieval-time transmission included.
+*(P0)*
 
 ## 12. Traceability to the proposal
 
