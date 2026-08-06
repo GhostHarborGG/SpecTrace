@@ -1,0 +1,29 @@
+{
+  "artifact": "spectrace.coverage-report",
+  "version": 1,
+  "repositoryCommit": "<commit>",
+  "engineVersion": "<version>",
+  "stalenessChecked": false,
+  "summary": {
+    "total": 2,
+    "linked": 1,
+    "stale": 0,
+    "unlinked": 1,
+    "linkTotal": 1,
+    "brokenLinkTotal": 0
+  },
+  "requirements": [
+    {
+      "requirementId": "REQ-V-001",
+      "state": "linked",
+      "linkCount": 1,
+      "brokenLinkCount": 0
+    },
+    {
+      "requirementId": "REQ-V-002",
+      "state": "unlinked",
+      "linkCount": 0,
+      "brokenLinkCount": 0
+    }
+  ]
+}

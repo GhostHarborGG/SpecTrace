@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { IPC_CHANNELS, type BufferOverride, type VaultAnalysis, type VaultSummary } from "../shared/ipc.js";
 import { readVault, readVaultFile, writeVaultFile } from "./vault.js";
 import { analyzeVault } from "./analysis.js";
+import { coverageReport } from "./coverage.js";
 
 const directory = join(fileURLToPath(import.meta.url), "..");
 
@@ -70,6 +71,14 @@ function registerHandlers(): void {
     IPC_CHANNELS.analyzeVault,
     (_event, root: string, overrides?: BufferOverride[]): VaultAnalysis =>
       analyzeVault({ root, ...(overrides ? { overrides } : {}) })
+  );
+
+  // The dashboard's data, built by core's shared envelope so it matches
+  // `spectrace coverage --json` exactly (NFR-APP-007).
+  ipcMain.handle(
+    IPC_CHANNELS.coverage,
+    (_event, root: string, symbolIndexPath?: string) =>
+      coverageReport({ root, ...(symbolIndexPath ? { indexPath: symbolIndexPath } : {}) })
   );
 }
 

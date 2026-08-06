@@ -587,6 +587,123 @@ describe("spectrace index (REQ-CLI-003, REQ-CORE-012)", () => {
     expect(status).toBe(0);
   });
 
+  it("projects ranking cost on a dry run while still calling no model (REQ-CLI-004 AC3)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stdout, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--dry-run",
+      "--ranking-model", "some-model",
+      "--input-cost-per-mtok", "2.5",
+      "--output-cost-per-mtok", "10",
+      "--json"
+    ], envWithoutApiKey());
+    expect(status).toBe(0);
+
+    const report = JSON.parse(stdout);
+    // The cost half of AC3: a projection, with the call count still zero.
+    expect(report.modelCalls).toBe(0);
+    expect(report.ranking).toBeUndefined();
+    expect(report.projectedRanking.calls).toBeGreaterThan(0);
+    expect(report.projectedRanking.inputTokens).toBeGreaterThan(0);
+    expect(report.projectedRanking.outputTokens).toBeGreaterThan(0);
+    expect(report.projectedRanking.estimatedCostUsd).toBeGreaterThan(0);
+    expect(report.projectedRanking.priced).toBe(true);
+    expect(report.projectedRanking.promptVersion).toBe("rank-v1");
+  });
+
+  it("reports a dry run as unpriced rather than free when no rates were given", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stdout } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--dry-run",
+      "--json"
+    ], envWithoutApiKey());
+
+    const report = JSON.parse(stdout);
+    expect(report.projectedRanking.priced).toBe(false);
+    expect(report.projectedRanking.estimatedCostUsd).toBe(0);
+    // Token counts are still projected — only the money is unknown.
+    expect(report.projectedRanking.inputTokens).toBeGreaterThan(0);
+  });
+
+  it("names the missing key rather than failing mid-run when ranking is requested (REQ-CORE-030)", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stderr, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--ranking-model", "some-model",
+      "--json"
+    ], envWithoutApiKey());
+
+    expect(status).toBe(2);
+    expect(JSON.parse(stderr).error).toBe("missing_api_key");
+    expect(stderr).toContain("--no-rank");
+  });
+
+  it("stops after retrieval when no ranking model is configured", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stdout, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3"
+    ], envWithoutApiKey());
+
+    expect(status).toBe(0);
+    expect(stdout).toContain("stopped after retrieval");
+  });
+
+  it("--no-rank skips ranking even with a model named", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stdout, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--top-k", "3",
+      "--ranking-model", "some-model",
+      "--no-rank",
+      "--json"
+    ], envWithoutApiKey());
+
+    // No key is set, so reaching the provider would exit 2 — proof it did not.
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout).ranking).toBeUndefined();
+  });
+
+  it("rejects a negative price", () => {
+    run(["index", "--repo", repo, "--rebuild"]);
+    const requirements = boundedRequirements();
+
+    const { stderr, status } = run([
+      "analyze",
+      "--requirements", requirements,
+      "--index", indexPath,
+      "--input-cost-per-mtok", "-1",
+      "--json"
+    ], envWithoutApiKey());
+
+    expect(status).toBe(2);
+    expect(JSON.parse(stderr).error).toBe("invalid_pricing");
+  });
+
   it("says in plain output that retrieval already sent the corpus (NFR-CORE-005)", () => {
     const requirements = boundedRequirements();
     const { stdout } = run([

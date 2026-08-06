@@ -15,10 +15,13 @@
  *   REQ-CORE-001/002 schema and validation, REQ-CORE-003/004 templates and
  *   config, and REQ-CORE-012 the local index artifact are implemented.
  *   REQ-CORE-023 bounded candidate sets is implemented — the gate every
- *   model payload passes through; Phase D's ranking consumes it.
+ *   model payload passes through, which Phase D's ranking consumes.
+ *   REQ-CORE-021/022 semantic and hybrid retrieval are implemented.
+ *   REQ-CORE-030/031/032 ranking, malformed-response handling, and usage
+ *   accounting are implemented; the ranking provider is injected, so nothing
+ *   here names a model vendor.
  *   Remaining:
- *   Phase C: semantic/hybrid retrieval          (REQ-CORE-021/022)
- *   Phase D: ranking + review + storage         (REQ-CORE-030..052)
+ *   Phase D: review + storage                   (REQ-CORE-040..052)
  *   Phase F: drift                              (REQ-CORE-060..063)
  */
 
@@ -187,6 +190,114 @@ export {
   type TransmissionViolationRule,
   type AuditOptions
 } from "./transmission/bounded-payload.js";
+
+// ---------- Ranking (REQ-CORE-030/031/032) ----------
+
+export {
+  rankCandidates,
+  parseRankingResponse,
+  type ParseContext,
+  type UnitOutcome
+} from "./ranking/rank.js";
+export {
+  buildRankingPrompt,
+  rankingPromptDigest,
+  RANKING_PROMPT_VERSION,
+  RANKING_SYSTEM_PROMPT,
+  RECORDED_PROMPT_DIGEST
+} from "./ranking/prompt.js";
+export { estimateCostUsd, summarizeUsage } from "./ranking/usage.js";
+export {
+  TRACE_CLASSIFICATIONS,
+  type TraceClassification,
+  type Proposal,
+  type RankingFailure,
+  type RankingFailureRule,
+  type RawResponseRecord,
+  type UsageRecord,
+  type UsageTotals,
+  type UsageReport,
+  type ModelPricing,
+  type RankingRequest,
+  type RankingResponse,
+  type RankingProvider,
+  type RankOptions,
+  type RankRunResult
+} from "./ranking/types.js";
+
+// ---------- Review and confidence bands (REQ-CORE-040/041/042) ----------
+
+export {
+  bandFor,
+  bucketProposals,
+  countByBand,
+  proposalKey,
+  type ConfidenceBand,
+  type BucketedProposal,
+  type RecordedBands,
+  type BandCounts
+} from "./review/bands.js";
+export {
+  recordDecision,
+  appendDecision,
+  emptyDecisionLog,
+  deriveLinkState,
+  recordedBands,
+  reviewStatistics,
+  serializeDecisionLog,
+  InvalidDecisionError,
+  DECISION_LOG_ARTIFACT,
+  DECISION_LOG_VERSION,
+  type DecisionKind,
+  type DecisionInput,
+  type Decision,
+  type DecisionLog,
+  type AcceptedLink,
+  type BandOverrides,
+  type ReviewStatistics
+} from "./review/decisions.js";
+
+// ---------- Link storage and queries (REQ-CORE-050/051/052) ----------
+
+export {
+  buildLinkIndex,
+  reconcileLinkIndex,
+  toTraceLinkRecords,
+  symbolsForRequirement,
+  requirementsForSymbol,
+  unlinkedRequirements,
+  coverageSummary,
+  serializeLinkIndex,
+  LINK_INDEX_ARTIFACT,
+  LINK_INDEX_VERSION,
+  LINK_INDEX_RELATIVE_PATH,
+  type StoredLink,
+  type LinkIndex,
+  type RequirementLinks,
+  type IndexDisagreement,
+  type IndexDisagreementRule,
+  type IndexReconciliation,
+  type RequirementLinkState,
+  type RequirementCoverage,
+  type CoverageSummary
+} from "./links/link-index.js";
+export {
+  resolveLinks,
+  type LinkResolution,
+  type ResolutionReport,
+  type ResolveLinksOptions
+} from "./links/staleness.js";
+
+// ---------- Shared report envelopes (REQ-CLI-007, NFR-APP-007) ----------
+
+export {
+  buildCoverageReport,
+  COVERAGE_REPORT_ARTIFACT,
+  COVERAGE_REPORT_VERSION,
+  type CoverageReport,
+  type CoverageReportTotals,
+  type BuildCoverageReportOptions
+} from "./reporting/coverage-report.js";
 
 // ---------- Evaluation (REQ-CORE-070/071) ----------
 

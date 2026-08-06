@@ -141,7 +141,7 @@ must match an equivalent CLI invocation at the same core version.
 |---|---|---|---|
 | [REQ-APP-010](requirements/REQ-APP-010.md) | Connect a GitHub repository (read-only) | P0 | proposed |
 | [REQ-APP-011](requirements/REQ-APP-011.md) | Repository sync and local cache | P0 | proposed |
-| [REQ-APP-012](requirements/REQ-APP-012.md) | Run analysis (index, retrieve, rank) | P0 | proposed |
+| [REQ-APP-012](requirements/REQ-APP-012.md) | Run analysis (index, retrieve, rank) | P0 | partial |
 | [REQ-APP-013](requirements/REQ-APP-013.md) | Link review queue | P0 | proposed |
 | [REQ-APP-014](requirements/REQ-APP-014.md) | Bidirectional navigation | P0 | proposed |
 <!-- spectrace:end -->

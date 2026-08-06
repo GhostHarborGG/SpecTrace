@@ -66,10 +66,10 @@ error, 3 validation failure.
 | [REQ-CLI-001](requirements/REQ-CLI-001.md) | spectrace init | P0 | implemented |
 | [REQ-CLI-002](requirements/REQ-CLI-002.md) | spectrace validate | P0 | implemented |
 | [REQ-CLI-003](requirements/REQ-CLI-003.md) | spectrace index | P0 | implemented |
-| [REQ-CLI-004](requirements/REQ-CLI-004.md) | spectrace analyze | P0 | partial |
-| [REQ-CLI-005](requirements/REQ-CLI-005.md) | spectrace review | P0 | proposed |
-| [REQ-CLI-006](requirements/REQ-CLI-006.md) | spectrace links | P0 | proposed |
-| [REQ-CLI-007](requirements/REQ-CLI-007.md) | spectrace coverage | P0 | proposed |
+| [REQ-CLI-004](requirements/REQ-CLI-004.md) | spectrace analyze | P0 | implemented |
+| [REQ-CLI-005](requirements/REQ-CLI-005.md) | spectrace review | P0 | implemented |
+| [REQ-CLI-006](requirements/REQ-CLI-006.md) | spectrace links | P0 | implemented |
+| [REQ-CLI-007](requirements/REQ-CLI-007.md) | spectrace coverage | P0 | implemented |
 | [REQ-CLI-008](requirements/REQ-CLI-008.md) | spectrace drift | P0 | proposed |
 | [REQ-CLI-009](requirements/REQ-CLI-009.md) | spectrace evaluate | P0 | implemented |
 <!-- spectrace:end -->

@@ -89,6 +89,14 @@ export interface BufferOverride {
   content: string;
 }
 
+/**
+ * A coverage report as core builds it (REQ-APP-020 AC1). Re-exported through
+ * the IPC contract rather than redefined: the dashboard consumes exactly what
+ * `spectrace coverage --json` emits, and a second declaration here would be a
+ * place for the two to drift (NFR-APP-007).
+ */
+export type { CoverageReport } from "@spectrace/core";
+
 export interface Api {
   /** Opens a folder picker and returns the chosen vault, or null if cancelled. */
   chooseVault(): Promise<VaultSummary | null>;
@@ -100,6 +108,12 @@ export interface Api {
   writeFile(root: string, relativePath: string, content: string): Promise<void>;
   /** Validates the vault through `@spectrace/core` and builds its link graph. */
   analyzeVault(root: string, overrides?: BufferOverride[]): Promise<VaultAnalysis>;
+  /**
+   * Coverage summary and per-requirement link states (REQ-APP-020).
+   * Byte-identical to `spectrace coverage --json` at the same commit — both
+   * call the same core builder (NFR-APP-007).
+   */
+  coverage(root: string, symbolIndexPath?: string): Promise<import("@spectrace/core").CoverageReport>;
 }
 
 /** Channel names, kept beside the contract so they cannot drift from it. */
@@ -108,5 +122,6 @@ export const IPC_CHANNELS = {
   openVault: "spectrace:openVault",
   readFile: "spectrace:readFile",
   writeFile: "spectrace:writeFile",
-  analyzeVault: "spectrace:analyzeVault"
+  analyzeVault: "spectrace:analyzeVault",
+  coverage: "spectrace:coverage"
 } as const satisfies Record<keyof Api, string>;

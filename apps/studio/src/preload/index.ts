@@ -11,7 +11,8 @@ const api: Api = {
   readFile: (root, relativePath) => ipcRenderer.invoke(IPC_CHANNELS.readFile, root, relativePath),
   writeFile: (root, relativePath, content) =>
     ipcRenderer.invoke(IPC_CHANNELS.writeFile, root, relativePath, content),
-  analyzeVault: (root, overrides) => ipcRenderer.invoke(IPC_CHANNELS.analyzeVault, root, overrides)
+  analyzeVault: (root, overrides) => ipcRenderer.invoke(IPC_CHANNELS.analyzeVault, root, overrides),
+  coverage: (root, symbolIndexPath) => ipcRenderer.invoke(IPC_CHANNELS.coverage, root, symbolIndexPath)
 };
 
 contextBridge.exposeInMainWorld("api", api);

@@ -17,7 +17,13 @@ git --version
 ```
 
 **Secrets (never in the repo):**
-- Anthropic API key → environment variable `ANTHROPIC_API_KEY` for CLI/dev; Studio later moves it to OS keychain.
+- OpenAI API key → environment variable `OPENAI_API_KEY` for CLI/dev; Studio later moves it to OS keychain.
+  Serves both the embedding model (REQ-CORE-021, Configuration B/C) and the
+  ranking model (REQ-CORE-030). **Corrected 2026-08-05 (BP)** — this line
+  previously named `ANTHROPIC_API_KEY`, written before the provider was
+  settled. Core reads neither variable: providers are injected at the CLI and
+  Studio boundary (CLAUDE.md rule 2), so the vendor choice is a client
+  concern and switching it touches no engine code.
 - GitHub fine-grained PAT, **read-only Contents** on the target repo → `GITHUB_TOKEN` for dev.
 
 **Exit criteria:** `pnpm -v` works; both tokens exercised once with a curl/octokit smoke call.

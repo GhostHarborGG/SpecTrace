@@ -276,15 +276,24 @@ completion.
 <!-- spectrace:begin REQ-CORE-03 -->
 | ID | Title | Priority | Status |
 |---|---|---|---|
-| [REQ-CORE-030](requirements/REQ-CORE-030.md) | Proposal generation | P0 | proposed |
-| [REQ-CORE-031](requirements/REQ-CORE-031.md) | Malformed-response handling | P0 | proposed |
-| [REQ-CORE-032](requirements/REQ-CORE-032.md) | Usage accounting | P0 | proposed |
+| [REQ-CORE-030](requirements/REQ-CORE-030.md) | Proposal generation | P0 | implemented |
+| [REQ-CORE-031](requirements/REQ-CORE-031.md) | Malformed-response handling | P0 | implemented |
+| [REQ-CORE-032](requirements/REQ-CORE-032.md) | Usage accounting | P0 | implemented |
 <!-- spectrace:end -->
 
-Deferred to Phase D by the 2026-08-02 descope (BP). The feasibility
-experiment's classification-accuracy question (prelim PQ3) and the token,
-latency, and cost portion of PQ4 are discharged when these land, measured
-against the frozen experiment repository.
+Deferred to Phase D by the 2026-08-02 descope (BP), and implemented
+2026-08-05 in `packages/core/src/ranking/`. The ranking provider is injected
+as the embedding provider is (REQ-CORE-021), so the engine constructs no
+client, reads no key, and names no vendor; the stage consumes REQ-CORE-023's
+bounded units and cannot assemble its own. Classifications are
+`implements | supports | unrelated`, the first two spelled as REQ-CORE-070's
+ground-truth relationships spell them so proposals and labels compare
+directly. The prompt version is guarded by a template digest, so an edited
+prompt fails the build until the version is bumped.
+
+The feasibility experiment's classification-accuracy question (prelim PQ3) and
+the token, latency, and cost portion of PQ4 are discharged when this stage is
+run against the frozen experiment repository — a measurement task, still open.
 
 ## 7. Human review and thresholds
 
@@ -299,14 +308,24 @@ evaluation data.
 <!-- spectrace:begin REQ-CORE-04 -->
 | ID | Title | Priority | Status |
 |---|---|---|---|
-| [REQ-CORE-040](requirements/REQ-CORE-040.md) | Review decisions | P0 | proposed |
-| [REQ-CORE-041](requirements/REQ-CORE-041.md) | Confidence bands | P0 | proposed |
-| [REQ-CORE-042](requirements/REQ-CORE-042.md) | Decision audit separation | P1 | proposed |
+| [REQ-CORE-040](requirements/REQ-CORE-040.md) | Review decisions | P0 | implemented |
+| [REQ-CORE-041](requirements/REQ-CORE-041.md) | Confidence bands | P0 | implemented |
+| [REQ-CORE-042](requirements/REQ-CORE-042.md) | Decision audit separation | P1 | implemented |
 <!-- spectrace:end -->
 
 Threshold defaults are provisional (suggest 0.75, review 0.50–0.74, discard
 below 0.50). Values tuned by the capstone evaluation ship as the new defaults
 with a version bump, per §13.
+
+Implemented 2026-08-05 in `packages/core/src/review/`. The claim that no path
+creates a link without a human decision is enforced by shape rather than by
+discipline: `deriveLinkState` is the only function in the engine that produces
+a link and its only input is decisions, so a proposal has no parameter to
+reach link state through. The audit trail is append-only and separate from
+link state — a reversal is a new entry, so accept-then-reject leaves two
+entries and one final state, and override rate is computable without replaying
+anything. An `unrelated` verdict bands as `discard` at any confidence: the
+bands rank link claims, and that verdict is the absence of one.
 
 ## 8. Link storage and navigation
 
@@ -319,10 +338,24 @@ human-readable copy from decaying into a stale mirror of a binary artifact.
 <!-- spectrace:begin REQ-CORE-05 -->
 | ID | Title | Priority | Status |
 |---|---|---|---|
-| [REQ-CORE-050](requirements/REQ-CORE-050.md) | Dual storage | P0 | proposed |
-| [REQ-CORE-051](requirements/REQ-CORE-051.md) | Bidirectional queries | P0 | proposed |
-| [REQ-CORE-052](requirements/REQ-CORE-052.md) | Stale link resolution | P0 | proposed |
+| [REQ-CORE-050](requirements/REQ-CORE-050.md) | Dual storage | P0 | implemented |
+| [REQ-CORE-051](requirements/REQ-CORE-051.md) | Bidirectional queries | P0 | implemented |
+| [REQ-CORE-052](requirements/REQ-CORE-052.md) | Stale link resolution | P0 | implemented |
 <!-- spectrace:end -->
+
+Implemented 2026-08-05 in `packages/core/src/links/`. `buildLinkIndex` takes
+requirements and a commit and nothing else, so the index cannot contain
+anything frontmatter does not already say — the reconstructibility the
+paragraph above asserts is a property of the signature, not a discipline. The
+write ordering both clients follow is frontmatter first, then index: a crash
+between them leaves a stale index, which is detectable and repairable, whereas
+the reverse order could leave an index asserting a link no document records,
+with nothing authoritative left to rebuild from.
+
+One consequence is worth stating plainly: because `TraceLinkRecord` carries no
+`implements`/`supports` field, neither does the index. The relationship lives
+on the decision that created the link and is read from the audit trail — see
+REQ-CORE-050's notes for the open question this raises for BP.
 
 ## 9. Drift detection
 

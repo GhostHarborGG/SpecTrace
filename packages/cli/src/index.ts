@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
  * @spectrace/cli — command surface (REQ-CLI-001..009).
- * Implemented: `index` (REQ-CLI-003 subset), `analyze` (REQ-CLI-004
- * subset: lexical retrieval / Configuration A only), `evaluate`
- * (REQ-CLI-009). The rest are stubs landing in their build-plan phases.
+ * Implemented: `index` (REQ-CLI-003 subset), `analyze` (REQ-CLI-004 —
+ * retrieval in all three configurations plus LLM ranking, bands, failure
+ * records, and usage accounting), `evaluate` (REQ-CLI-009). The rest are
+ * stubs landing in their build-plan phases.
  * Exit codes (spec §11): 0 ok, 1 operational, 2 usage, 3 validation.
  */
 import { Command } from "commander";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import {
   ArtifactFormatError,
   CONFIG_FILE_RELATIVE_PATH,
@@ -25,9 +26,29 @@ import {
   TEMPLATES,
   TRANSMISSION_LOG_ARTIFACT,
   TRANSMISSION_LOG_VERSION,
+  appendDecision,
   auditTransmissionLog,
+  bandFor,
+  buildCoverageReport,
+  buildLinkIndex,
+  buildRankingPrompt,
+  deriveLinkState,
+  emptyDecisionLog,
+  proposalKey,
+  recordDecision,
+  recordedBands,
+  requirementsForSymbol,
+  resolveLinks,
+  reviewStatistics,
+  serializeDecisionLog,
+  symbolsForRequirement,
+  unlinkedRequirements,
   buildTransmissionUnits,
+  countByBand,
+  estimateCostUsd,
   evaluateRetrieval,
+  rankCandidates,
+  RANKING_PROMPT_VERSION,
   instantiateTemplate,
   isIndexCurrent,
   renderDefaultConfig,
@@ -49,8 +70,15 @@ import {
   type RetrievalMode,
   type MergeConfig,
   type MergeStrategyId,
+  type DecisionKind,
+  type DecisionLog,
+  type LinkIndex,
+  type LinkRelationship,
   type MetricsArtifact,
+  type ModelPricing,
+  type Proposal,
   type RequirementDocument,
+  type SpectraceConfig,
   type RunProvenance,
   type SymbolIndexProvenance,
   type TransmissionAudit,
@@ -58,6 +86,31 @@ import {
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
 import { DEFAULT_EMBEDDING_MODEL } from "./embedding-provider.js";
+import { createOpenAIRankingProvider, estimateTokens } from "./ranking-provider.js";
+import { headCommit, loadVault, resolveReviewer, writeAcceptedLinks, type LoadedVault } from "./vault.js";
+
+/** `spectrace analyze --proposals` output, as `review` consumes it. */
+interface ProposalsArtifact {
+  proposals: Proposal[];
+}
+
+/**
+ * A `--decide` batch (REQ-CLI-005 AC3). `skip` is accepted and recorded as
+ * skipped rather than rejected — declining to decide is not a decision, and
+ * writing it as one would put a verdict in the audit trail that nobody made.
+ */
+interface DecisionBatch {
+  decisions: Array<{
+    requirementId: string;
+    symbolId: string;
+    kind: DecisionKind | "skip";
+    redirectTo?: { symbolId: string; relationship?: LinkRelationship };
+    /** ISO 8601; defaults to now. Supplied, a batch replays deterministically. */
+    timestamp?: string;
+    note?: string;
+  }>;
+}
+
 import { runRetrieval } from "./retrieval-run.js";
 import { COMPARISON_FORMATS, renderComparison, type ComparisonFormat } from "./comparison-format.js";
 import { renderComparisonChart } from "./comparison-chart.js";
@@ -376,10 +429,31 @@ program
     }
   );
 
+/**
+ * Token pricing for cost estimates (REQ-CORE-032, REQ-CLI-004 AC3).
+ *
+ * Rates are supplied per run rather than baked in: core deliberately holds no
+ * vendor price list, and a stale hardcoded number is worse than an absent one
+ * because it is reported with the same confidence as a correct one. Returns
+ * `undefined` when neither flag is given — the run is then reported as
+ * unpriced rather than as costing zero. Promoting these to `.spectrace/config.yaml`
+ * would be a REQ-CORE-004 amendment; flags first, pending BP.
+ */
+function readPricing(
+  inputPerMtok: string | undefined,
+  outputPerMtok: string | undefined
+): ModelPricing | undefined | "invalid" {
+  if (inputPerMtok === undefined && outputPerMtok === undefined) return undefined;
+  const input = Number.parseFloat(inputPerMtok ?? "0");
+  const output = Number.parseFloat(outputPerMtok ?? "0");
+  if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) return "invalid";
+  return { inputPerMillionTokens: input, outputPerMillionTokens: output };
+}
+
 program
   .command("analyze")
   .description(
-    "Retrieve candidates per requirement (REQ-CLI-004 subset: lexical retrieval and the transmission bound; ranking lands in Phase D)"
+    "Retrieve candidates per requirement and, when a ranking model is configured, classify them into proposals with confidence bands, failure records, and usage totals (REQ-CLI-004)"
   )
   .requiredOption("--requirements <dir>", "directory of requirement .md files (prelim spec §6.3 format)")
   .requiredOption("--index <file>", "JSONL symbol index produced by `spectrace index`")
@@ -421,6 +495,17 @@ program
       "not just the top-k candidates (REQ-CORE-023 AC3)",
     false
   )
+  .option(
+    "--ranking-model <id>",
+    "rank retrieved candidates with this model (default: config model.ranking; unset, the run stops after retrieval)"
+  )
+  .option("--no-rank", "skip ranking even when a ranking model is configured")
+  .option(
+    "--proposals <file>",
+    "write proposals, failure records, and usage totals as JSON (REQ-CORE-030…032)"
+  )
+  .option("--input-cost-per-mtok <usd>", "input token price, US dollars per million, for cost estimates")
+  .option("--output-cost-per-mtok <usd>", "output token price, US dollars per million, for cost estimates")
   .option("--json", "machine-readable output on stdout")
   .action(
     async (
@@ -441,6 +526,11 @@ program
         embeddingDimensions?: string;
         embeddingCache?: string;
         acceptCorpusTransmission: boolean;
+        rankingModel?: string;
+        rank: boolean;
+        proposals?: string;
+        inputCostPerMtok?: string;
+        outputCostPerMtok?: string;
         json?: boolean;
       },
       cmd: Command
@@ -594,6 +684,16 @@ program
     // and it embedded the whole corpus rather than any bounded set. That goes
     // in the same log: a report that covered only the payload assembled here
     // would be accurate about the bound and misleading about the run.
+    // Assembled once and shared by the transmission log and the ranking stage
+    // below, so the log does not merely describe a payload of the same shape —
+    // it describes the exact object the model was handed.
+    const units = buildTransmissionUnits({
+      requirementTexts: new Map(requirements.map((r) => [r.id, buildRequirementQueryText(r)])),
+      candidateSets: results,
+      symbols,
+      topK
+    });
+
     let transmission: { log: TransmissionLog; audit: TransmissionAudit; path?: string } | undefined;
     if (opts.dryRun || opts.transmissionLog) {
       const log: TransmissionLog = {
@@ -618,12 +718,7 @@ program
               }
             : {})
         },
-        units: buildTransmissionUnits({
-          requirementTexts: new Map(requirements.map((r) => [r.id, buildRequirementQueryText(r)])),
-          candidateSets: results,
-          symbols,
-          topK
-        })
+        units
       };
       const audit = auditTransmissionLog({ log, candidateSets: results, mode });
       transmission = { log, audit };
@@ -631,6 +726,135 @@ program
         transmission.path = resolve(opts.transmissionLog);
         mkdirSync(dirname(transmission.path), { recursive: true });
         writeFileSync(transmission.path, serializeTransmissionLog(log), "utf8");
+      }
+    }
+
+    // ---------- Ranking (REQ-CORE-030…032, REQ-CLI-004 AC2/AC3) ----------
+
+    const pricing = readPricing(opts.inputCostPerMtok, opts.outputCostPerMtok);
+    if (pricing === "invalid") {
+      fail(
+        {
+          error: "invalid_pricing",
+          message: "--input-cost-per-mtok and --output-cost-per-mtok must be non-negative numbers."
+        },
+        2
+      );
+      return;
+    }
+
+    // "Run retrieval and, per configuration, LLM ranking" — so ranking happens
+    // when a model is configured, and its absence stops the run after
+    // retrieval rather than erroring. --no-rank overrides; --dry-run never
+    // calls a model at all.
+    const rankingModel = opts.rankingModel ?? config.model.ranking ?? undefined;
+    const wantsRanking = opts.rank && !opts.dryRun && rankingModel !== undefined;
+
+    // AC3's cost half: projected from the assembled payload, with zero calls.
+    // Output tokens are unknowable before the fact, so the projection budgets a
+    // fixed allowance per candidate and says so — a cost estimate that quietly
+    // modelled only input would read low by exactly the expensive half.
+    const OUTPUT_TOKENS_PER_CANDIDATE = 60;
+    const projected = units.reduce(
+      (acc, unit) => {
+        if (unit.candidates.length === 0) return acc;
+        const prompt = buildRankingPrompt(unit);
+        return {
+          calls: acc.calls + 1,
+          inputTokens: acc.inputTokens + estimateTokens(prompt.system) + estimateTokens(prompt.user),
+          outputTokens: acc.outputTokens + unit.candidates.length * OUTPUT_TOKENS_PER_CANDIDATE
+        };
+      },
+      { calls: 0, inputTokens: 0, outputTokens: 0 }
+    );
+    const projectedCostUsd = estimateCostUsd(
+      projected.inputTokens,
+      projected.outputTokens,
+      pricing
+    );
+
+    let ranking:
+      | {
+          proposals: Array<{
+            requirementId: string;
+            symbolId: string;
+            rank: number;
+            classification: string;
+            confidence: number;
+            band: string;
+            rationale: string;
+          }>;
+          bands: ReturnType<typeof countByBand>;
+          failures: Awaited<ReturnType<typeof rankCandidates>>["failures"];
+          usage: Awaited<ReturnType<typeof rankCandidates>>["usage"];
+          promptVersion: string;
+          modelId: string;
+          path?: string;
+        }
+      | undefined;
+
+    if (wantsRanking) {
+      const apiKey = process.env["OPENAI_API_KEY"];
+      if (apiKey === undefined || apiKey.length === 0) {
+        fail(
+          {
+            error: "missing_api_key",
+            message: `Set OPENAI_API_KEY to rank with "${rankingModel}", or pass --no-rank to stop after retrieval.`
+          },
+          2
+        );
+        return;
+      }
+
+      const result = await rankCandidates({
+        units,
+        provider: createOpenAIRankingProvider({ apiKey, model: rankingModel }),
+        ...(pricing === undefined ? {} : { pricing })
+      });
+
+      const bucketed = result.proposals.map((proposal) => ({
+        ...proposal,
+        band: bandFor(proposal.confidence, proposal.classification, config.bands)
+      }));
+
+      ranking = {
+        proposals: bucketed,
+        bands: countByBand(
+          bucketed.map((entry) => ({ proposal: entry, band: entry.band, reviewed: false }))
+        ),
+        failures: result.failures,
+        usage: result.usage,
+        promptVersion: result.promptVersion,
+        modelId: result.modelId
+      };
+
+      if (opts.proposals) {
+        ranking.path = resolve(opts.proposals);
+        mkdirSync(dirname(ranking.path), { recursive: true });
+        writeFileSync(
+          ranking.path,
+          `${JSON.stringify(
+            {
+              artifact: "spectrace.proposals",
+              version: 1,
+              repositoryCommit,
+              configurationId: provenance.configurationId,
+              engineVersion: CORE_VERSION,
+              promptVersion: result.promptVersion,
+              modelId: result.modelId,
+              bands: config.bands,
+              proposals: bucketed,
+              failures: result.failures,
+              // The raw bodies behind every failure's rawResponseRef, so a
+              // reader can see what the model actually said (REQ-CORE-031).
+              rawResponses: result.rawResponses,
+              usage: result.usage
+            },
+            null,
+            2
+          )}\n`,
+          "utf8"
+        );
       }
     }
 
@@ -645,10 +869,17 @@ program
         ...(transmission
           ? {
               dryRun: opts.dryRun,
-              // No ranking model exists to call yet (REQ-CORE-030, Phase D).
-              // Embedded texts are counted, not assumed: retrieval already ran.
-              modelCalls: 0,
+              // Counted, never assumed: retrieval has already run by this
+              // point, and ranking either ran or provably did not.
+              modelCalls: ranking?.usage.run.calls ?? 0,
               embeddedTextCount: transmission.audit.embeddedTextCount,
+              projectedRanking: {
+                ...projected,
+                estimatedCostUsd: projectedCostUsd,
+                priced: pricing !== undefined,
+                outputTokensPerCandidate: OUTPUT_TOKENS_PER_CANDIDATE,
+                promptVersion: RANKING_PROMPT_VERSION
+              },
               transmission: {
                 excerptCount: transmission.audit.excerptCount,
                 permittedExcerptCount: transmission.audit.permittedExcerptCount,
@@ -657,6 +888,22 @@ program
                 retrieval: transmission.log.retrieval,
                 violations: transmission.audit.violations,
                 ...(transmission.path ? { logPath: toPosixPath(transmission.path) } : {})
+              }
+            }
+          : {}),
+        ...(ranking
+          ? {
+              ranking: {
+                modelId: ranking.modelId,
+                promptVersion: ranking.promptVersion,
+                bands: config.bands,
+                proposalCount: ranking.proposals.length,
+                byBand: ranking.bands,
+                failureCount: ranking.failures.length,
+                proposals: ranking.proposals,
+                failures: ranking.failures,
+                usage: ranking.usage,
+                ...(ranking.path ? { proposalsPath: toPosixPath(ranking.path) } : {})
               }
             }
           : {}),
@@ -675,9 +922,18 @@ program
       }
       if (transmission) {
         const { audit } = transmission;
+        const modelCalls = ranking?.usage.run.calls ?? 0;
         process.stdout.write(
           `would transmit ${audit.excerptCount} candidate excerpt(s) across ${audit.requirementCount} ` +
-            `requirement(s); bound for this run is ${audit.permittedExcerptCount}. 0 model calls.\n`
+            `requirement(s); bound for this run is ${audit.permittedExcerptCount}. ` +
+            `${modelCalls} model call${modelCalls === 1 ? "" : "s"}.\n`
+        );
+        process.stdout.write(
+          `projected ranking: ${projected.calls} call(s), ~${projected.inputTokens} input + ` +
+            `~${projected.outputTokens} output token(s)` +
+            (pricing === undefined
+              ? " — unpriced; pass --input-cost-per-mtok/--output-cost-per-mtok to estimate cost.\n"
+              : ` — estimated $${projectedCostUsd.toFixed(4)}.\n`)
         );
         const embedding = transmission.log.retrieval.embedding;
         if (embedding === undefined) {
@@ -693,9 +949,30 @@ program
         for (const violation of audit.violations) process.stdout.write(`  [${violation.rule}] ${violation.message}\n`);
         if (transmission.path) process.stdout.write(`${toPosixPath(transmission.path)}\n`);
       }
+      if (ranking) {
+        const { bands, usage } = ranking;
+        process.stdout.write(
+          `ranked with ${ranking.modelId} (prompt ${ranking.promptVersion}): ` +
+            `${ranking.proposals.length} proposal(s) — ${bands.suggest} suggest, ` +
+            `${bands.review} review, ${bands.discard} discard; ${ranking.failures.length} failure(s).\n`
+        );
+        process.stdout.write(
+          `usage: ${usage.run.calls} call(s), ${usage.run.inputTokens} input + ` +
+            `${usage.run.outputTokens} output token(s)` +
+            (pricing === undefined ? " — unpriced.\n" : `, estimated $${usage.run.estimatedCostUsd.toFixed(4)}.\n`)
+        );
+        for (const failure of ranking.failures) {
+          process.stdout.write(`  [${failure.rule}] ${failure.requirementId}: ${failure.message}\n`);
+        }
+        if (ranking.path) process.stdout.write(`${toPosixPath(ranking.path)}\n`);
+      } else if (!opts.dryRun && rankingModel === undefined) {
+        process.stdout.write(
+          "no ranking model configured (model.ranking / --ranking-model); stopped after retrieval.\n"
+        );
+      }
       if (outPath) {
         process.stdout.write(`${toPosixPath(outPath)}\n`);
-      } else if (!transmission) {
+      } else if (!transmission && !ranking) {
         for (const set of results) {
           const top = set.candidates[0];
           process.stdout.write(`${set.requirementId}: ${top ? `${top.symbolId} (${top.score.toFixed(3)})` : "no candidates"}\n`);
@@ -708,9 +985,438 @@ program
   }
   );
 
-program.command("review").description("Review queued proposals").action(stub("REQ-CLI-005", "Phase D"));
-program.command("links").description("Bidirectional trace-link queries").action(stub("REQ-CLI-006", "Phase D/E"));
-program.command("coverage").description("Coverage summary").action(stub("REQ-CLI-007", "Phase D/E"));
+/**
+ * The interactive review loop (REQ-CLI-005 AC1).
+ *
+ * Queues proposals in the `suggest` and `review` bands — `discard` is withheld
+ * by design (REQ-CORE-041), and putting it in a reviewer's queue would undo
+ * the triage the bands exist to provide. Already-decided proposals are skipped
+ * so a second pass shows only what is left.
+ *
+ * Nothing here writes: it collects a batch and hands it back, so the
+ * interactive and `--decide` paths converge on exactly one code path to the
+ * audit trail.
+ */
+async function promptForDecisions(
+  proposals: readonly Proposal[],
+  config: SpectraceConfig,
+  log: DecisionLog,
+  symbols: readonly CodeSymbol[]
+): Promise<DecisionBatch> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const decided = new Set(recordedBands(log).keys());
+  const sourceById = new Map(symbols.map((s) => [s.symbolId, s]));
+
+  const queue = proposals
+    .map((proposal) => ({
+      proposal,
+      band: bandFor(proposal.confidence, proposal.classification, config.bands)
+    }))
+    .filter(
+      (entry) =>
+        entry.band !== "discard" && !decided.has(proposalKey(entry.proposal.requirementId, entry.proposal.symbolId))
+    )
+    .sort((a, b) => (a.band === b.band ? 0 : a.band === "suggest" ? -1 : 1));
+
+  const decisions: DecisionBatch["decisions"] = [];
+  try {
+    if (queue.length === 0) {
+      process.stdout.write("Nothing queued for review.\n");
+      return { decisions };
+    }
+
+    for (const [i, entry] of queue.entries()) {
+      const { proposal } = entry;
+      const symbol = sourceById.get(proposal.symbolId);
+      process.stdout.write(
+        `\n[${i + 1}/${queue.length}] ${proposal.requirementId} → ${proposal.symbolId}\n` +
+          `  ${entry.band} · ${proposal.classification} · confidence ${proposal.confidence.toFixed(2)}\n` +
+          `  ${proposal.rationale}\n`
+      );
+      if (symbol === undefined) {
+        process.stdout.write(
+          sourcePreviewHint(symbols.length) + "\n"
+        );
+      } else {
+        process.stdout.write(
+          `  ${symbol.relativePath}:${symbol.startLine}-${symbol.endLine}\n` +
+            `${symbol.normalizedSource
+              .split("\n")
+              .slice(0, 12)
+              .map((line) => `  | ${line}`)
+              .join("\n")}\n`
+        );
+      }
+
+      const answer = (await rl.question("  [a]ccept [r]eject re[d]irect [s]kip [q]uit > ")).trim().toLowerCase();
+      if (answer === "q") break;
+      if (answer === "a" || answer === "r") {
+        decisions.push({
+          requirementId: proposal.requirementId,
+          symbolId: proposal.symbolId,
+          kind: answer === "a" ? "accept" : "reject"
+        });
+        continue;
+      }
+      if (answer === "d") {
+        const target = (await rl.question("  redirect to symbol ID > ")).trim();
+        if (target.length === 0) {
+          process.stdout.write("  no target given — skipped.\n");
+          decisions.push({ requirementId: proposal.requirementId, symbolId: proposal.symbolId, kind: "skip" });
+          continue;
+        }
+        decisions.push({
+          requirementId: proposal.requirementId,
+          symbolId: proposal.symbolId,
+          kind: "redirect",
+          redirectTo: { symbolId: target }
+        });
+        continue;
+      }
+      decisions.push({ requirementId: proposal.requirementId, symbolId: proposal.symbolId, kind: "skip" });
+    }
+  } finally {
+    rl.close();
+  }
+
+  return { decisions };
+}
+
+/** Explains an absent source preview rather than showing a blank where one belongs. */
+function sourcePreviewHint(symbolCount: number): string {
+  return symbolCount === 0
+    ? "  (no source preview — pass --index <file> to show one)"
+    : "  (symbol not in the index — it may have moved or been deleted)";
+}
+
+/** Shared preamble for the vault-reading commands (REQ-CLI-005…007). */
+function openVault(repoPath: string):
+  | { ok: true; repo: string; config: SpectraceConfig; vault: LoadedVault; index: LinkIndex; commit: string }
+  | { ok: false } {
+  const repo = resolve(repoPath);
+  if (!existsSync(repo)) {
+    fail({ error: "missing_repo", message: `${repo} does not exist.` }, 1);
+    return { ok: false };
+  }
+  const { config } = loadConfig(repo);
+  const vault = loadVault(repo, config);
+  if (vault.violations.length > 0) {
+    fail(
+      {
+        error: "invalid_requirements",
+        message: "Requirement documents must validate before links can be read (REQ-CORE-002).",
+        violations: vault.violations
+      },
+      3
+    );
+    return { ok: false };
+  }
+  const commit = headCommit(repo);
+  return { ok: true, repo, config, vault, commit, index: buildLinkIndex(vault.requirements, commit) };
+}
+
+program
+  .command("review")
+  .description("Review queued proposals: accept, reject, redirect, or skip (REQ-CLI-005)")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml", ".")
+  .requiredOption("--proposals <file>", "proposals artifact from `spectrace analyze --proposals`")
+  .option("--decisions <file>", "append-only decision trail (default: <repo>/.spectrace/decisions.json)")
+  .option("--reviewer <name>", "reviewer identity (default: git config user.name)")
+  .option("--decide <file>", "apply a JSON decision batch without a TTY")
+  .option("--index <file>", "symbol index from `spectrace index`, for the source preview in interactive review")
+  .option("--json", "machine-readable output on stdout")
+  .action(async (opts: {
+    repo: string;
+    proposals: string;
+    decisions?: string;
+    reviewer?: string;
+    decide?: string;
+    index?: string;
+    json?: boolean;
+  }, cmd: Command) => {
+    const opened = openVault(opts.repo);
+    if (!opened.ok) return;
+    const { repo, config, vault, commit } = opened;
+
+    // AC2: identity is never guessed. A trail whose reviewers are inferred
+    // records who probably decided, which is not what an audit trail is for.
+    const reviewer = resolveReviewer(repo, opts.reviewer);
+    if (reviewer === undefined) {
+      fail(
+        {
+          error: "unknown_reviewer",
+          message: "Pass --reviewer <name>, or set git config user.name (REQ-CLI-005 AC2)."
+        },
+        2
+      );
+      return;
+    }
+
+    let proposalsFile: ProposalsArtifact;
+    try {
+      proposalsFile = JSON.parse(readFileSync(resolve(opts.proposals), "utf8")) as ProposalsArtifact;
+    } catch (error) {
+      fail(
+        { error: "unreadable_proposals", message: error instanceof Error ? error.message : String(error) },
+        1
+      );
+      return;
+    }
+    if (!Array.isArray(proposalsFile.proposals)) {
+      fail({ error: "malformed_proposals", message: "Proposals artifact has no `proposals` array." }, 1);
+      return;
+    }
+
+    const decisionsPath = resolve(opts.decisions ?? join(repo, ".spectrace", "decisions.json"));
+    let log: DecisionLog = existsSync(decisionsPath)
+      ? (JSON.parse(readFileSync(decisionsPath, "utf8")) as DecisionLog)
+      : emptyDecisionLog();
+
+    // AC1 is the interactive loop; AC3 is the batch file. `review` without
+    // `--decide` is the one command SPEC-CLI-000 §3 exempts from running
+    // non-interactively, so a missing TTY is refused rather than guessed at.
+    let batch: DecisionBatch;
+    if (opts.decide === undefined) {
+      if (!process.stdin.isTTY) {
+        fail(
+          {
+            error: "no_tty",
+            message:
+              "Interactive review needs a terminal; pass --decide <file> with a JSON decision batch (REQ-CLI-005 AC3)."
+          },
+          2
+        );
+        return;
+      }
+      let symbols: CodeSymbol[] = [];
+      if (opts.index !== undefined) {
+        try {
+          symbols = readSymbols(resolve(opts.index));
+        } catch (error) {
+          fail(
+            { error: "unreadable_index", message: error instanceof Error ? error.message : String(error) },
+            1
+          );
+          return;
+        }
+      }
+      batch = await promptForDecisions(proposalsFile.proposals, config, log, symbols);
+    } else {
+      try {
+        batch = JSON.parse(readFileSync(resolve(opts.decide), "utf8")) as DecisionBatch;
+      } catch (error) {
+        fail({ error: "unreadable_batch", message: error instanceof Error ? error.message : String(error) }, 1);
+        return;
+      }
+      if (!Array.isArray(batch.decisions)) {
+        fail({ error: "malformed_batch", message: "Decision batch has no `decisions` array." }, 2);
+        return;
+      }
+    }
+
+    const byKey = new Map(
+      proposalsFile.proposals.map((p) => [proposalKey(p.requirementId, p.symbolId), p])
+    );
+    const applied: string[] = [];
+    const skipped: Array<{ requirementId: string; symbolId: string; reason: string }> = [];
+
+    for (const entry of batch.decisions) {
+      const proposal = byKey.get(proposalKey(entry.requirementId, entry.symbolId));
+      if (proposal === undefined) {
+        skipped.push({
+          requirementId: entry.requirementId,
+          symbolId: entry.symbolId,
+          reason: "no matching proposal in the artifact"
+        });
+        continue;
+      }
+      if (entry.kind === "skip") {
+        skipped.push({
+          requirementId: entry.requirementId,
+          symbolId: entry.symbolId,
+          reason: "skipped by the reviewer"
+        });
+        continue;
+      }
+      try {
+        log = appendDecision(
+          log,
+          recordDecision(
+            proposal,
+            bandFor(proposal.confidence, proposal.classification, config.bands),
+            {
+              kind: entry.kind,
+              reviewer,
+              timestamp: entry.timestamp ?? new Date().toISOString(),
+              repositoryCommit: commit,
+              ...(entry.redirectTo ? { redirectTo: entry.redirectTo } : {}),
+              ...(entry.note ? { note: entry.note } : {})
+            }
+          )
+        );
+        applied.push(proposalKey(entry.requirementId, entry.symbolId));
+      } catch (error) {
+        fail(
+          { error: "invalid_decision", message: error instanceof Error ? error.message : String(error) },
+          2
+        );
+        return;
+      }
+    }
+
+    mkdirSync(dirname(decisionsPath), { recursive: true });
+    writeFileSync(decisionsPath, serializeDecisionLog(log), "utf8");
+
+    // The one path to link storage, and it runs on decisions (REQ-CORE-040).
+    const links = deriveLinkState(log);
+    const written = writeAcceptedLinks(repo, vault, links, commit);
+    const stats = reviewStatistics(log);
+
+    if (cmd.optsWithGlobals().json) {
+      printJson(process.stdout, {
+        reviewer,
+        repositoryCommit: commit,
+        applied: applied.length,
+        skipped,
+        decisions: log.decisions.length,
+        links: links.length,
+        statistics: stats,
+        decisionsPath: toPosixPath(decisionsPath),
+        updatedDocuments: written.updatedDocuments,
+        indexPath: toPosixPath(written.indexPath)
+      });
+    } else {
+      process.stdout.write(
+        `${applied.length} decision(s) applied by ${reviewer}; ${skipped.length} skipped. ` +
+          `${links.length} accepted link(s) across ${written.updatedDocuments.length} document(s).\n`
+      );
+      process.stdout.write(
+        `override rate ${(stats.overrideRate * 100).toFixed(1)}% over ${stats.decided} decided ` +
+          `(${stats.auditEntries} audit entries).\n`
+      );
+      process.stdout.write(`${toPosixPath(decisionsPath)}\n${toPosixPath(written.indexPath)}\n`);
+    }
+  });
+
+program
+  .command("links")
+  .description("Bidirectional trace-link queries (REQ-CLI-006)")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml", ".")
+  .option("--req <id>", "list the symbols linked to this requirement")
+  .option("--symbol <id>", "list the requirements linked to this symbol")
+  .option("--unlinked", "list requirements with no accepted links", false)
+  .option("--json", "machine-readable output on stdout")
+  .action((opts: { repo: string; req?: string; symbol?: string; unlinked: boolean; json?: boolean }, cmd: Command) => {
+    const selectors = [opts.req !== undefined, opts.symbol !== undefined, opts.unlinked].filter(Boolean);
+    if (selectors.length !== 1) {
+      fail(
+        {
+          error: "invalid_query",
+          message: "Pass exactly one of --req <id>, --symbol <id>, or --unlinked (REQ-CLI-006)."
+        },
+        2
+      );
+      return;
+    }
+
+    const opened = openVault(opts.repo);
+    if (!opened.ok) return;
+    const { vault, index } = opened;
+
+    if (opts.req !== undefined) {
+      if (!vault.requirements.some((r) => r.id === opts.req)) {
+        fail({ error: "unknown_requirement", message: `No requirement document for ${opts.req}.` }, 2);
+        return;
+      }
+      const symbols = symbolsForRequirement(index, opts.req);
+      if (cmd.optsWithGlobals().json) printJson(process.stdout, { requirementId: opts.req, symbols });
+      else for (const symbolId of symbols) process.stdout.write(`${symbolId}\n`);
+      return;
+    }
+
+    if (opts.symbol !== undefined) {
+      const requirementIds = requirementsForSymbol(index, opts.symbol);
+      if (cmd.optsWithGlobals().json) printJson(process.stdout, { symbolId: opts.symbol, requirementIds });
+      else for (const id of requirementIds) process.stdout.write(`${id}\n`);
+      return;
+    }
+
+    const unlinked = unlinkedRequirements(index, vault.requirements.map((r) => r.id));
+    if (cmd.optsWithGlobals().json) printJson(process.stdout, { unlinked });
+    else for (const id of unlinked) process.stdout.write(`${id}\n`);
+  });
+
+program
+  .command("coverage")
+  .description("Coverage summary and per-requirement link states (REQ-CLI-007)")
+  .option("--repo <path>", "repository root holding .spectrace/config.yaml", ".")
+  .option(
+    "--index <file>",
+    "symbol index from `spectrace index`; supplied, links to symbols that no longer exist are reported stale (REQ-CORE-052)"
+  )
+  .option("--json", "machine-readable output on stdout")
+  .action((opts: { repo: string; index?: string; json?: boolean }, cmd: Command) => {
+    const opened = openVault(opts.repo);
+    if (!opened.ok) return;
+    const { vault, index, commit } = opened;
+
+    // Staleness is opt-in: without a symbol index there is no honest way to
+    // say whether a link still resolves, and guessing "it does" would report
+    // coverage the vault has not earned (REQ-CORE-052).
+    let brokenSymbolIds = new Set<string>();
+    let resolution: ReturnType<typeof resolveLinks> | undefined;
+    if (opts.index !== undefined) {
+      let symbols: CodeSymbol[];
+      try {
+        symbols = readSymbols(resolve(opts.index));
+      } catch (error) {
+        const kind = error instanceof IndexArtifactFormatError ? "malformed_index" : "unreadable_index";
+        fail({ error: kind, message: error instanceof Error ? error.message : String(error) }, 1);
+        return;
+      }
+      resolution = resolveLinks({
+        index,
+        knownSymbolIds: new Set(symbols.map((s) => s.symbolId)),
+        repositoryCommit: commit
+      });
+      brokenSymbolIds = resolution.brokenSymbolIds;
+    }
+
+    // Built by core, not here: Studio emits the same envelope from the same
+    // function, so parity is structural rather than a thing two
+    // implementations have to be kept agreeing on (NFR-APP-007).
+    const report = buildCoverageReport({
+      index,
+      requirementIds: vault.requirements.map((r) => r.id),
+      engineVersion: CORE_VERSION,
+      repositoryCommit: commit,
+      ...(resolution ? { resolution } : {})
+    });
+    const summary = report.summary;
+
+    if (cmd.optsWithGlobals().json) {
+      printJson(process.stdout, report);
+    } else {
+      process.stdout.write(
+        `${summary.linked}/${summary.total} requirement(s) linked, ${summary.stale} stale, ` +
+          `${summary.unlinked} unlinked; ${summary.linkTotal} accepted link(s).\n`
+      );
+      if (resolution === undefined) {
+        process.stdout.write("staleness not checked — pass --index to resolve links against the symbol index.\n");
+      } else if (summary.brokenLinkTotal > 0) {
+        process.stdout.write(`${summary.brokenLinkTotal} link(s) no longer resolve:\n`);
+        for (const entry of resolution.broken) {
+          process.stdout.write(
+            `  ${entry.requirementId} → ${entry.symbolId} (last resolved ${entry.lastResolvedCommit.slice(0, 8)})\n`
+          );
+        }
+      }
+      for (const row of report.requirements) {
+        process.stdout.write(`  ${row.state.padEnd(8)} ${row.requirementId} (${row.linkCount} link(s))\n`);
+      }
+    }
+  });
 program.command("drift").description("Git-aware drift analysis").action(stub("REQ-CLI-008", "Phase F"));
 
 const evaluate = program.command("evaluate").description("Evaluation metrics against labeled ground truth (REQ-CLI-009)");
