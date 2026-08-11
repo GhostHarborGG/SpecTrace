@@ -232,7 +232,14 @@ export async function rankCandidates(options: RankOptions): Promise<RankRunResul
   const usage: UsageRecord[] = [...(options.priorUsage ?? [])];
 
   let completed = 0;
+  let cancelled = false;
   for (const unit of units) {
+    // Checked before the call, so a cancelled run stops without spending on a
+    // request whose answer nobody is waiting for.
+    if (options.signal?.aborted === true) {
+      cancelled = true;
+      break;
+    }
     if (unit.candidates.length === 0) {
       options.onProgress?.(++completed, units.length);
       continue;
@@ -303,6 +310,7 @@ export async function rankCandidates(options: RankOptions): Promise<RankRunResul
     rawResponses,
     usage: summarizeUsage(usage),
     promptVersion: RANKING_PROMPT_VERSION,
-    modelId: provider.modelId
+    modelId: provider.modelId,
+    cancelled
   };
 }

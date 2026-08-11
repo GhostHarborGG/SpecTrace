@@ -7,15 +7,16 @@ them, keeps every link under human review, and detects when the two drift apart
 as the repository evolves.
 
 [![CI](https://github.com/GhostHarborGG/SpecTrace/actions/workflows/ci.yml/badge.svg)](https://github.com/GhostHarborGG/SpecTrace/actions/workflows/ci.yml)
-[![Phase](https://img.shields.io/badge/phase-C%20·%20indexing%20%26%20retrieval-1f6feb)](specs/spectrace-build-plan-with-claude.md)
+[![Phase](https://img.shields.io/badge/phase-D%20·%20ranking%20%26%20review-1f6feb)](specs/spectrace-build-plan-with-claude.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![pnpm](https://img.shields.io/badge/pnpm-10.14-f69220?logo=pnpm&logoColor=white)](https://pnpm.io)
 [![License](https://img.shields.io/badge/license-not%20yet%20licensed-lightgrey)](#license)
 
-> **Status: pre-1.0, under active development.** The engine and CLI are being
-> built requirement by requirement against a frozen specification. Interfaces
-> will change until `v1.0.0`. See [Project status](#project-status).
+> **Status: pre-1.0, under active development.** The engine, CLI, and desktop
+> app are being built requirement by requirement against a frozen
+> specification. Interfaces will change until `v1.0.0`. See
+> [Project status](#project-status).
 
 ---
 
@@ -62,15 +63,15 @@ Design commitments that shape everything else:
 ## Project status
 
 The build plan is **gated by exit criteria, not calendar dates** — a phase ends
-when its gate is green. Two gates are closed.
+when its gate is green. Three gates are closed.
 
 | Phase | Focus | Gate |
 |---|---|---|
 | **A** | Foundations & feasibility | ✅ **Closed 2026-08-02** — GO on retrieval quality |
 | **B** | Schema freeze, dataset & Studio skeleton | ✅ **Closed 2026-08-02** — all three criteria met |
-| **C** | Indexing & retrieval, evaluated | 🔨 **In progress** — Recall@k for configurations A and B, report-ready |
-| **D** | Ranking & review (+ Studio sync/analysis) | ⏳ Planned |
-| **E** | Navigation & the review queue | ⏳ Planned |
+| **C** | Indexing & retrieval, evaluated | ✅ **Closed 2026-08-04** — configuration A ships as the default |
+| **D** | Ranking & review (+ Studio sync/analysis) | 🔨 **In progress** — full `analyze → review` loop on both surfaces |
+| **E** | Navigation & the review queue | 🔨 Started early — queue and panes exist, several criteria open |
 | **F** | Drift detection, both surfaces | ⏳ Planned |
 | **G** | Evaluation, case study & full dogfood | ⏳ Planned |
 | **H** | Write-up, polish & public release (`v1.0.0`) | ⏳ Planned |
@@ -87,6 +88,21 @@ measured-and-reverted ranking variants — are written up in
 `spectrace init` and `spectrace validate` run clean over this repository's own
 vault (55 requirements, 0 violations), and Studio opens the vault read-only.
 
+**Phase C** measured all three retrieval configurations on the frozen corpus
+and shipped **lexical (Configuration A) as the default**. Semantic retrieval
+scored higher (R@5 1.000 vs 0.750) and is reported as evidence that the
+retrieval-first bet clears its bar — a separate claim from what ships, because
+semantic mode embeds the whole repository and the default must transmit
+nothing. Reaching that mode takes two deliberate acts: selecting it, and
+accepting corpus transmission per run.
+
+**Phase D** is in progress. The `analyze → review` loop works end to end on
+both surfaces, ranking runs against an injected provider with per-requirement
+cost accounting, and Studio runs the same pipeline as the CLI by calling the
+same functions rather than reimplementing them. Remaining: the GitHub
+connection and repository cache (REQ-APP-010/011), and the byte-for-byte
+proposal parity measurement.
+
 ### Requirement progress
 
 55 requirements across three specification documents, tracked one file per
@@ -94,13 +110,20 @@ requirement in [`specs/requirements/`](specs/requirements/):
 
 | Family | Scope | Implemented | Partial | Proposed | Total |
 |---|---|--:|--:|--:|--:|
-| `REQ-CORE` | Engine: schema, index, retrieval, ranking, links, drift | 8 | 1 | 17 | 26 |
-| `REQ-CLI` | Command surface | 3 | 1 | 5 | 9 |
-| `REQ-APP` | Studio (desktop app) | 0 | 1 | 19 | 20 |
-| | **Total** | **11** | **3** | **41** | **55** |
+| `REQ-CORE` | Engine: schema, index, retrieval, ranking, links, drift | 22 | 0 | 4 | 26 |
+| `REQ-CLI` | Command surface | 8 | 0 | 1 | 9 |
+| `REQ-APP` | Studio (desktop app) | 0 | 8 | 12 | 20 |
+| | **Total** | **30** | **8** | **17** | **55** |
 
-Backed by **188 tests** across the monorepo, each mapped to a specific
+Backed by **545 tests** across the monorepo, each mapped to a specific
 acceptance criterion, run on Linux, Windows, and macOS in CI.
+
+`partial` is used literally: a requirement sits there when some acceptance
+criteria hold and others do not, and each requirement file names exactly which
+and why. Every `REQ-APP` requirement that has been started is `partial` rather
+than `implemented` — the surfaces exist and are driven by tests, but criteria
+like "redirect allows searching the symbol index" or "badges update without a
+full re-analysis" are honestly not met yet.
 
 ## Quick start
 
@@ -121,6 +144,7 @@ pnpm cli --help                       # nine commands
 pnpm cli init                         # scaffold .spectrace/ config + templates
 pnpm cli validate --json              # validate the requirement vault
 pnpm cli index --json                 # build the symbol index
+pnpm cli coverage --json              # linked / stale / untraced totals
 ```
 
 SpecTrace traces itself — the commands above run against this repository's own
@@ -267,12 +291,12 @@ per-repo settings, so both machines and CI validate against the same ones.
 |---|---|---|
 | `init` | Scaffold `.spectrace/` config and templates | ✅ Implemented |
 | `validate` | Validate specs against the requirement schema | ✅ Implemented |
-| `index` | Build the symbol index for a repository | 🔨 Partial |
-| `analyze` | Retrieve candidates per requirement | 🔨 Partial (lexical only) |
+| `index` | Build the symbol index for a repository | ✅ Implemented |
+| `analyze` | Retrieve candidates, then rank them into proposals | ✅ Implemented |
 | `evaluate` | Metrics against labeled ground truth | ✅ Implemented |
-| `review` | Interactive proposal triage | ⏳ Phase D |
-| `links` | Bidirectional trace-link queries | ⏳ Phase D |
-| `coverage` | Coverage summary | ⏳ Phase D |
+| `review` | Interactive proposal triage | ✅ Implemented |
+| `links` | Bidirectional trace-link queries | ✅ Implemented |
+| `coverage` | Coverage summary | ✅ Implemented |
 | `drift` | Git-aware drift analysis | ⏳ Phase F |
 
 Every command supports `--json` for machine-readable output. Exit codes:
@@ -285,8 +309,11 @@ packages/core     @spectrace/core — the engine. Owns every contract:
                   schema, indexing, retrieval, ranking, links, drift.
                   No console output, no env reads, no process.exit.
 packages/cli      @spectrace/cli — a thin command surface over core.
-apps/studio       Electron desktop app (walking skeleton). Consumes core
-                  through IPC and never bypasses it.
+packages/providers @spectrace/providers — the OpenAI adapters satisfying
+                  core's provider interfaces. CLI and Studio both depend on
+                  it; core never does, so the engine stays vendor-free.
+apps/studio       Electron desktop app. Consumes core through IPC and never
+                  bypasses it.
 specs/            The specification vault — and the dogfood target.
                   requirements/ holds one file per requirement; the
                   *-spec.md documents are narrative indexes.
@@ -298,6 +325,31 @@ scripts/          spec-index.mjs — generates and checks the spec tables.
 Studio is deliberately one phase behind core throughout, and is **not** a
 capstone deliverable — it is the product surface that continues after the
 academic work concludes.
+
+### Studio
+
+Four surfaces, each mapping to one requirement:
+
+| Surface | Does | Requirement |
+|---|---|---|
+| **Edit** | Vault tree, CodeMirror editor, live schema validation, trace and wiki-link panes | `REQ-APP-001…004`, `014` |
+| **Analysis** | Runs index → retrieve → rank with per-stage progress, cost before and after the model stage, and cancellation | `REQ-APP-012` |
+| **Review** | Keyboard triage of proposals — `a`/`r`/`d`/`s`, `j`/`k` — writing the audit trail, frontmatter, then the index | `REQ-APP-013` |
+| **Coverage** | Linked / stale / untraced totals and per-requirement link states | `REQ-APP-020` |
+
+Studio does not reimplement engine behavior; it calls it. The analysis
+pipeline, the coverage envelope, and the banding that decides what reaches the
+review queue all live in `@spectrace/core` and are invoked by both clients.
+Parity is a property of there being one implementation, not of two being
+tested against each other.
+
+Two things Studio deliberately does **not** do yet: connect to GitHub, and
+resolve a repository from a commit SHA (`REQ-APP-010/011`). It analyses the
+working tree on disk.
+
+```bash
+pnpm --filter @spectrace/studio dev
+```
 
 ## Development
 

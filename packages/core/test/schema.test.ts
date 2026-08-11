@@ -241,3 +241,50 @@ describe("validateRequirements — REQ-CORE-002 (validation rules)", () => {
     expect(() => structuredClone(report)).not.toThrow();
   });
 });
+
+describe("REQ-CORE-001 statement (amended 2026-08-10)", () => {
+  const doc = (frontmatter: string, body: string) => ({
+    path: "requirements/REQ-X-001.md",
+    content: `---\nid: REQ-X-001\ntitle: A thing\nstatus: proposed\npriority: P0\nlinks: []\nacceptance_criteria:\n  - It works.\n---\n${frontmatter}\n${body}\n`
+  });
+
+  it("reads the `## Statement` body section", () => {
+    const { requirement } = parseRequirementDocument(
+      doc("", "# A thing\n\n## Statement\n\nThe system shall do the thing.\n")
+    );
+    expect(requirement?.statement).toBe("The system shall do the thing.");
+  });
+
+  it("prefers frontmatter over the body section, as `rationale` does", () => {
+    const parsed = parseRequirementDocument({
+      path: "requirements/REQ-X-001.md",
+      content:
+        "---\nid: REQ-X-001\ntitle: A thing\nstatus: proposed\npriority: P0\nstatement: From frontmatter.\nlinks: []\nacceptance_criteria:\n  - It works.\n---\n\n## Statement\n\nFrom the body.\n"
+    });
+    expect(parsed.requirement?.statement).toBe("From frontmatter.");
+  });
+
+  it("does not leak `statement` into `extra` when given in frontmatter", () => {
+    const parsed = parseRequirementDocument({
+      path: "requirements/REQ-X-001.md",
+      content:
+        "---\nid: REQ-X-001\ntitle: A thing\nstatus: proposed\npriority: P0\nstatement: Here.\nlinks: []\nacceptance_criteria:\n  - It works.\n---\n"
+    });
+    expect(parsed.requirement?.extra).not.toHaveProperty("statement");
+  });
+
+  it("is optional — a document without one stays valid", () => {
+    const { requirement, violations } = parseRequirementDocument(doc("", "# A thing\n\nNo statement section.\n"));
+    expect(violations).toEqual([]);
+    expect(requirement).not.toBeNull();
+    expect(requirement?.statement).toBeUndefined();
+  });
+
+  it("stops at the next heading, so following sections are not swallowed", () => {
+    const { requirement } = parseRequirementDocument(
+      doc("", "# A thing\n\n## Statement\n\nOnly this.\n\n## Rationale\n\nNot this.\n")
+    );
+    expect(requirement?.statement).toBe("Only this.");
+    expect(requirement?.rationale).toBe("Not this.");
+  });
+});

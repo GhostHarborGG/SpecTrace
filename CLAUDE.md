@@ -51,6 +51,9 @@ ask for one or propose a spec change first.
 - `packages/core` — @spectrace/core: the engine (schema, index, retrieval,
   ranking, links, drift). Owns all contracts.
 - `packages/cli` — @spectrace/cli: thin command surface over core.
+- `packages/providers` — @spectrace/providers: the OpenAI adapters (embedding,
+  ranking) satisfying core's provider interfaces. CLI and Studio both depend on
+  it; core never does, so the engine stays vendor-free.
 - `apps/studio` — Electron app (added later; consumes core, never bypasses it).
 - `specs/` — the spec vault (also the dogfood target). `specs/requirements/`
   holds one file per requirement; the `*-spec.md` documents are narrative.

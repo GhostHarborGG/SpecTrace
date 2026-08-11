@@ -4,7 +4,7 @@ import {
   RankingRequestError,
   createOpenAIRankingProvider,
   estimateTokens
-} from "../src/ranking-provider.js";
+} from "../src/openai-ranking.js";
 
 function unit(requirementId: string, symbolIds: readonly string[]): TransmissionUnit {
   return {

@@ -18,11 +18,8 @@ import {
   DEFAULT_MERGE_STRATEGY,
   EmbeddingCache,
   embeddingKey,
-  mergeCandidateSets,
-  mergePoolSize,
   requiresCorpusTransmissionConsent,
-  retrieveCandidates,
-  retrieveSemanticCandidates,
+  retrieveForMode,
   serializeEmbeddingCache,
   symbolEmbeddingText,
   type CandidateSet,
@@ -30,7 +27,7 @@ import {
   type MergeConfig,
   type RetrievalMode
 } from "@spectrace/core";
-import { createOpenAIEmbeddingProvider } from "./embedding-provider.js";
+import { createOpenAIEmbeddingProvider } from "@spectrace/providers";
 import type { EmbeddingProvider } from "@spectrace/core";
 
 /**
@@ -146,25 +143,21 @@ export type RetrievalRunResult =
 
 export async function runRetrieval(options: RetrievalRunOptions): Promise<RetrievalRunResult> {
   const merge: MergeConfig = options.merge ?? { strategy: DEFAULT_MERGE_STRATEGY };
-  // Hybrid retrieves a wider pool per configuration and merges down to topK;
-  // a merge of two already-truncated lists has little disagreement to exploit.
-  const retrievalK = options.mode === "hybrid" ? mergePoolSize(options.topK) : options.topK;
 
-  const runLexical = (): CandidateSet[] =>
-    retrieveCandidates({
+  // The dispatch itself lives in core (`retrieveForMode`), shared with Studio
+  // so the two clients cannot retrieve differently (REQ-APP-012 AC1). What
+  // stays here is everything core deliberately refuses to own: constructing a
+  // provider, reading and writing the cache file, and turning a refusal into
+  // wording that names the flag a user would type.
+  if (options.mode === "lexical") {
+    const { results, configurationId } = await retrieveForMode({
       queries: options.queries,
       symbols: options.symbols,
-      topK: retrievalK,
-      repositoryCommit: options.repositoryCommit
+      repositoryCommit: options.repositoryCommit,
+      mode: "lexical",
+      topK: options.topK
     });
-
-  if (options.mode === "lexical") {
-    const results = runLexical();
-    return {
-      ok: true,
-      results,
-      configurationId: results[0]?.configurationId ?? "bm25f"
-    };
+    return { ok: true, results, configurationId };
   }
 
   const embedding = options.embedding ?? {};
@@ -243,13 +236,15 @@ export async function runRetrieval(options: RetrievalRunOptions): Promise<Retrie
     };
   }
 
-  let semantic;
+  let run;
   try {
-    semantic = await retrieveSemanticCandidates({
+    run = await retrieveForMode({
       queries: options.queries,
       symbols: options.symbols,
-      topK: retrievalK,
       repositoryCommit: options.repositoryCommit,
+      mode: options.mode,
+      topK: options.topK,
+      merge,
       provider,
       ...(cache ? { cache } : {})
     });
@@ -262,39 +257,27 @@ export async function runRetrieval(options: RetrievalRunOptions): Promise<Retrie
     };
   }
 
+  // `retrieveForMode` reports what it embedded; the corpus-wide counts and the
+  // cache file are this layer's to add, since core neither knows where the
+  // cache lives nor writes files.
   const embeddings: EmbeddingRunReport = {
-    modelId: provider.modelId,
-    dimensions: provider.dimensions,
+    modelId: run.embedding!.modelId,
+    dimensions: run.embedding!.dimensions,
     symbolTexts: options.symbols.length,
     queryTexts: options.queries.length,
-    embedded: semantic.embeddedCount,
-    cached: semantic.cachedCount
+    embedded: run.embedding!.embedded,
+    cached: run.embedding!.cached
   };
   if (embedding.cachePath) {
     mkdirSync(dirname(embedding.cachePath), { recursive: true });
-    writeFileSync(embedding.cachePath, serializeEmbeddingCache(semantic.cache.toFile()), "utf8");
+    writeFileSync(embedding.cachePath, serializeEmbeddingCache(run.embedding!.cache.toFile()), "utf8");
     embeddings.cachePath = embedding.cachePath;
   }
 
-  if (options.mode === "semantic") {
-    return {
-      ok: true,
-      results: semantic.results,
-      configurationId: semantic.results[0]?.configurationId ?? "embed",
-      embeddings
-    };
-  }
-
-  const results = mergeCandidateSets({
-    lexical: runLexical(),
-    semantic: semantic.results,
-    topK: options.topK,
-    config: merge
-  });
   return {
     ok: true,
-    results,
-    configurationId: results[0]?.configurationId ?? "hybrid",
+    results: run.results,
+    configurationId: run.configurationId,
     embeddings
   };
 }

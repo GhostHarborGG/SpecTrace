@@ -13,7 +13,7 @@ import {
   unlinkedRequirements,
   type RequirementLinks
 } from "../src/links/link-index.js";
-import { resolveLinks } from "../src/links/staleness.js";
+import { resolveLinks, resolveProposals } from "../src/links/staleness.js";
 
 const COMMIT = "c".repeat(40);
 const LATER = "d".repeat(40);
@@ -316,5 +316,122 @@ describe("REQ-CORE-052 stale link resolution", () => {
     const snapshot = structuredClone(index);
     resolveLinks({ index, knownSymbolIds: new Set(), repositoryCommit: LATER });
     expect(index).toEqual(snapshot);
+  });
+});
+
+describe("REQ-CORE-011 AC2 proposal staleness under exclusions", () => {
+  const ALPHA = "ts:src/a.ts#alpha:function";
+  const GENERATED = "ts:src/generated/api.ts#fetchUser:function";
+  const DELETED = "ts:src/gone.ts#removed:function";
+
+  const PROPOSALS = [
+    { requirementId: "REQ-X-001", symbolId: ALPHA },
+    { requirementId: "REQ-X-001", symbolId: GENERATED },
+    { requirementId: "REQ-X-002", symbolId: DELETED }
+  ];
+
+  /** Stands in for the configured patterns: everything under `src/generated/`. */
+  const isExcludedPath = (path: string): boolean => path.startsWith("src/generated/");
+
+  it("flags a proposal whose symbol a new exclusion pattern removed", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set([ALPHA]),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    const excluded = report.stale.find((entry) => entry.symbolId === GENERATED);
+    expect(excluded).toMatchObject({
+      requirementId: "REQ-X-001",
+      stale: true,
+      reason: "excluded",
+      path: "src/generated/api.ts"
+    });
+  });
+
+  it("separates an excluded symbol from one that is simply gone", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set([ALPHA]),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    expect(report.stale.map((entry) => [entry.symbolId, entry.reason])).toEqual([
+      [GENERATED, "excluded"],
+      [DELETED, "missing"]
+    ]);
+  });
+
+  it("leaves a proposal whose symbol survived re-indexing unflagged", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set([ALPHA, GENERATED, DELETED]),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    expect(report.stale).toEqual([]);
+    expect(report.entries.every((entry) => entry.stale === false)).toBe(true);
+  });
+
+  it("trusts the index over the patterns when the two disagree", () => {
+    // The indexer emitted the symbol, so it exists whatever the pattern says.
+    const report = resolveProposals({
+      proposals: [{ requirementId: "REQ-X-001", symbolId: GENERATED }],
+      knownSymbolIds: new Set([GENERATED]),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    expect(report.stale).toEqual([]);
+  });
+
+  it("reports every absent symbol as missing when no patterns are supplied", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set([ALPHA]),
+      repositoryCommit: LATER
+    });
+
+    expect(report.stale.map((entry) => entry.reason)).toEqual(["missing", "missing"]);
+  });
+
+  it("returns one verdict per proposal, in order, dropping none", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set(),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    expect(report.entries).toHaveLength(PROPOSALS.length);
+    expect(report.entries.map((entry) => entry.symbolId)).toEqual(
+      PROPOSALS.map((proposal) => proposal.symbolId)
+    );
+    expect(report.checkedCommit).toBe(LATER);
+  });
+
+  it("cannot call an unparseable symbol ID excluded", () => {
+    const report = resolveProposals({
+      proposals: [{ requirementId: "REQ-X-001", symbolId: "not-a-symbol-id" }],
+      knownSymbolIds: new Set(),
+      isExcludedPath: () => true,
+      repositoryCommit: LATER
+    });
+
+    expect(report.stale[0]).toMatchObject({ stale: true, reason: "missing", path: null });
+  });
+
+  it("survives structuredClone (CLAUDE.md rule 3)", () => {
+    const report = resolveProposals({
+      proposals: PROPOSALS,
+      knownSymbolIds: new Set([ALPHA]),
+      isExcludedPath,
+      repositoryCommit: LATER
+    });
+
+    expect(structuredClone(report)).toEqual(report);
   });
 });

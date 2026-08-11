@@ -49,10 +49,12 @@ export interface RequirementLoadResult {
   errors: RequirementError[];
 }
 
-/** Query text for retrieval: the requirement's title, statement, and acceptance criteria. */
-export function buildRequirementQueryText(requirement: ParsedRequirement): string {
-  return [requirement.title, requirement.statement, ...requirement.acceptanceCriteria].join(" ");
-}
+/**
+ * Query text for retrieval, defined in core so every client builds it
+ * identically (REQ-APP-012 AC1). Re-exported here because callers reach for it
+ * beside the loader that produces its input.
+ */
+export { buildRequirementQueryText } from "@spectrace/core";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;

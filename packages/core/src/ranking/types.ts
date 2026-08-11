@@ -191,6 +191,16 @@ export interface RankOptions {
   priorUsage?: readonly UsageRecord[];
   /** Progress callback — the engine writes no console output (CLAUDE.md rule 2). */
   onProgress?: (completed: number, total: number) => void;
+  /**
+   * Stops the run at the next unit boundary (REQ-APP-012 AC3).
+   *
+   * Checked between calls rather than during one: a provider call already in
+   * flight has been paid for whether or not its answer is read, so discarding
+   * it would spend a caller's money to save nothing. Whatever completed before
+   * the signal fired is returned with `cancelled: true` — a partial result the
+   * caller can keep, not an exception that throws it away.
+   */
+  signal?: { readonly aborted: boolean };
 }
 
 export interface RankRunResult {
@@ -202,4 +212,10 @@ export interface RankRunResult {
   usage: UsageReport;
   promptVersion: string;
   modelId: string;
+  /**
+   * Whether the run stopped early on {@link RankOptions.signal}. False for a
+   * run that ranked every unit, so a caller can tell a complete result from a
+   * partial one without comparing counts.
+   */
+  cancelled: boolean;
 }

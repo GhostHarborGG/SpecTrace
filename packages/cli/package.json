@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@spectrace/core": "workspace:*",
+    "@spectrace/providers": "workspace:*",
     "commander": "^12.1.0",
     "gray-matter": "^4.0.3"
   }
