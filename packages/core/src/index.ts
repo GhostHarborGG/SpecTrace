@@ -94,7 +94,12 @@ export {
   type IndexerConfig,
   type IndexResult
 } from "./indexer/typescript-indexer.js";
-export { assignSymbolIds, hashSignature, type OverloadSignature } from "./indexer/symbol-id.js";
+export {
+  assignSymbolIds,
+  hashSignature,
+  symbolIdPath,
+  type OverloadSignature
+} from "./indexer/symbol-id.js";
 export { ExclusionMatcher, type ExclusionConfig } from "./indexer/exclusions.js";
 export {
   serializeSymbolIndex,
@@ -207,6 +212,23 @@ export {
   RECORDED_PROMPT_DIGEST
 } from "./ranking/prompt.js";
 export { estimateCostUsd, summarizeUsage } from "./ranking/usage.js";
+
+// ---------- The shared analysis pipeline (REQ-CLI-004, REQ-APP-012) ----------
+
+export {
+  estimateTokens,
+  buildRequirementQueryText,
+  retrieveForMode,
+  projectRankingCost,
+  rankWithBands,
+  OUTPUT_TOKENS_PER_CANDIDATE,
+  type RetrieveForModeOptions,
+  type RetrieveForModeResult,
+  type CostProjection,
+  type BandedProposal,
+  type RankWithBandsOptions,
+  type RankWithBandsResult
+} from "./pipeline/analysis.js";
 export {
   TRACE_CLASSIFICATIONS,
   type TraceClassification,
@@ -283,9 +305,15 @@ export {
 } from "./links/link-index.js";
 export {
   resolveLinks,
+  resolveProposals,
   type LinkResolution,
   type ResolutionReport,
-  type ResolveLinksOptions
+  type ResolveLinksOptions,
+  type ProposalReference,
+  type ProposalStaleness,
+  type ProposalStaleReason,
+  type ProposalStalenessReport,
+  type ResolveProposalsOptions
 } from "./links/staleness.js";
 
 // ---------- Shared report envelopes (REQ-CLI-007, NFR-APP-007) ----------

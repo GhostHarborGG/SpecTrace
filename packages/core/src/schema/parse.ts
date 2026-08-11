@@ -33,7 +33,16 @@ export interface ParsedRequirement {
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/;
 /** Frontmatter keys the schema owns; everything else is preserved in `extra`. */
-const SCHEMA_KEYS = new Set(["id", "title", "status", "priority", "rationale", "links", "acceptance_criteria"]);
+const SCHEMA_KEYS = new Set([
+  "id",
+  "title",
+  "status",
+  "priority",
+  "statement",
+  "rationale",
+  "links",
+  "acceptance_criteria"
+]);
 
 /**
  * Text of a `## <heading>` section, up to the next heading of any level.
@@ -215,12 +224,17 @@ export function parseRequirementDocument(document: RequirementDocument): ParsedR
   }
 
   const rationale = nonEmptyString(frontmatter["rationale"]) ?? bodySection(body, "Rationale");
+  // Read exactly as `rationale` is, from frontmatter or the body section
+  // (REQ-CORE-001, amended 2026-08-10). Optional, so no existing document
+  // becomes invalid; absent, retrieval simply has less to work with.
+  const statement = nonEmptyString(frontmatter["statement"]) ?? bodySection(body, "Statement");
 
   const requirement: Requirement = {
     id,
     title,
     status: status as RequirementStatus,
     priority: (priorityRaw as RequirementPriority | undefined) ?? DEFAULT_REQUIREMENT_PRIORITY,
+    ...(statement ? { statement } : {}),
     ...(rationale ? { rationale } : {}),
     acceptanceCriteria,
     traceLinks,

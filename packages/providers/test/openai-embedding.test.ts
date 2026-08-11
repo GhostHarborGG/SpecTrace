@@ -3,7 +3,7 @@ import {
   DEFAULT_EMBEDDING_MODEL,
   EmbeddingRequestError,
   createOpenAIEmbeddingProvider
-} from "../src/embedding-provider.js";
+} from "../src/openai-embedding.js";
 
 /** A fetch stand-in that returns a scripted sequence of responses and records every request body. */
 function scriptedFetch(responses: (Response | Error)[]) {

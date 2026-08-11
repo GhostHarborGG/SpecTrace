@@ -142,7 +142,7 @@ body, which is what makes a stored link survive ordinary development.
 | ID | Title | Priority | Status |
 |---|---|---|---|
 | [REQ-CORE-010](requirements/REQ-CORE-010.md) | Symbol extraction | P0 | implemented |
-| [REQ-CORE-011](requirements/REQ-CORE-011.md) | Exclusions | P0 | partial |
+| [REQ-CORE-011](requirements/REQ-CORE-011.md) | Exclusions | P0 | implemented |
 | [REQ-CORE-012](requirements/REQ-CORE-012.md) | Local index artifact | P0 | implemented |
 <!-- spectrace:end -->
 

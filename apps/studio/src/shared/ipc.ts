@@ -97,6 +97,112 @@ export interface BufferOverride {
  */
 export type { CoverageReport } from "@spectrace/core";
 
+// ---------- Analysis runs (REQ-APP-012) ----------
+
+/** The pipeline's stages, in order. `estimate` is where AC2's projection lands. */
+export type AnalysisStage = "index" | "retrieve" | "estimate" | "rank";
+
+export interface RunProgress {
+  stage: AnalysisStage;
+  completed: number;
+  total: number;
+  /** Human-readable detail for the current stage, e.g. "412 symbol(s)". */
+  detail?: string;
+}
+
+/**
+ * A run's outcome. Cancellation is a normal result rather than an error: AC3
+ * is that the last completed stage's artifacts survive, so the caller needs a
+ * value it can read, not an exception it is tempted to discard.
+ */
+export interface RunResult {
+  cancelled: boolean;
+  /** The stage the run was in when it stopped. Present only when cancelled. */
+  cancelledDuring?: AnalysisStage;
+  repositoryCommit: string;
+  configurationId?: string;
+  symbolCount?: number;
+  requirementCount?: number;
+  /** Projected before ranking (AC2, first half). Absent if the run stopped earlier. */
+  projection?: import("@spectrace/core").CostProjection;
+  proposalCount?: number;
+  bandCounts?: import("@spectrace/core").BandCounts;
+  failureCount?: number;
+  /** Measured after ranking (AC2, second half) — the provider's numbers, not the estimate. */
+  usage?: import("@spectrace/core").UsageReport;
+  promptVersion?: string;
+  modelId?: string;
+  /** POSIX paths of every artifact this run checkpointed, in write order. */
+  artifactsWritten: string[];
+}
+
+// ---------- Review queue (REQ-APP-013) ----------
+
+/** One queued proposal, with the band that put it there and any staleness flag. */
+export interface QueueEntry {
+  proposal: import("@spectrace/core").Proposal;
+  band: import("@spectrace/core").ConfidenceBand;
+  /** True when the symbol is no longer in the index (REQ-CORE-011 AC2). */
+  stale: boolean;
+  staleReason?: "excluded" | "missing";
+}
+
+export interface QueueSnapshot {
+  /** `suggest` first, then `review`. `discard` is withheld, never queued. */
+  entries: QueueEntry[];
+  /** Proposals in the artifact, including withheld and already-decided ones. */
+  total: number;
+  decided: number;
+  /** Proposals in the `discard` band, kept inspectable but not queued. */
+  withheld: number;
+  /** Non-null when staleness could not be checked, and why. */
+  stalenessUnchecked: string | null;
+  proposalsPath: string | null;
+}
+
+export interface DecisionRequest {
+  root: string;
+  reviewer: string;
+  decisions: Array<{
+    requirementId: string;
+    symbolId: string;
+    kind: import("@spectrace/core").DecisionKind | "skip";
+    /** Symbol ID to redirect to; required when `kind` is "redirect". */
+    redirectTo?: string;
+    /** ISO 8601; defaults to now. Supplied, a batch replays deterministically. */
+    timestamp?: string;
+  }>;
+}
+
+export interface ReviewOutcome {
+  applied: number;
+  skipped: Array<{ requirementId: string; symbolId: string; reason: string }>;
+  links: number;
+  statistics: import("@spectrace/core").ReviewStatistics;
+  updatedDocuments: string[];
+  decisionsPath: string;
+  indexPath: string;
+}
+
+// ---------- Bidirectional navigation (REQ-APP-014) ----------
+
+export interface TraceNeighbours {
+  /** Symbol IDs linked to the given requirement. */
+  symbols: string[];
+  /** Requirement IDs linked to the given symbol. */
+  requirements: string[];
+  /** Requirements with no accepted link at all. */
+  unlinked: string[];
+}
+
+export interface RunAnalysisRequest {
+  root: string;
+  /** Overrides `retrieval.mode` from configuration. */
+  mode?: import("@spectrace/core").RetrievalMode;
+  /** Per-million-token pricing; absent, the run is reported unpriced rather than free. */
+  pricing?: import("@spectrace/core").ModelPricing;
+}
+
 export interface Api {
   /** Opens a folder picker and returns the chosen vault, or null if cancelled. */
   chooseVault(): Promise<VaultSummary | null>;
@@ -114,6 +220,33 @@ export interface Api {
    * call the same core builder (NFR-APP-007).
    */
   coverage(root: string, symbolIndexPath?: string): Promise<import("@spectrace/core").CoverageReport>;
+  /**
+   * Runs the core pipeline, checkpointing each stage (REQ-APP-012).
+   * Resolves with the run's outcome, including a cancelled one.
+   */
+  runAnalysis(request: RunAnalysisRequest): Promise<RunResult>;
+  /**
+   * Requests cancellation of the run in flight (AC3). Returns whether there
+   * was one to cancel, so a UI can tell "stopped it" from "nothing running"
+   * instead of reporting success either way.
+   */
+  cancelAnalysis(): Promise<boolean>;
+  /**
+   * Subscribes to per-stage progress. Returns an unsubscribe function.
+   *
+   * A stream rather than a polled getter: AC2 wants cost and progress visible
+   * *during* the run, and a renderer that has to ask cannot show a stage it
+   * did not think to ask about.
+   */
+  onRunProgress(listener: (progress: RunProgress) => void): () => void;
+  /** The review queue as core bands it (REQ-APP-013). */
+  reviewQueue(root: string): Promise<QueueSnapshot>;
+  /** Applies decisions through core and writes the trail, frontmatter, then index. */
+  applyDecisions(request: DecisionRequest): Promise<ReviewOutcome>;
+  /** Trace-link neighbours in both directions (REQ-APP-014, REQ-CORE-051). */
+  traceNeighbours(root: string, requirementId?: string, symbolId?: string): Promise<TraceNeighbours>;
+  /** Git `user.name`, so the reviewer field is never guessed (REQ-CLI-005 AC2's rule). */
+  defaultReviewer(root: string): Promise<string | null>;
 }
 
 /** Channel names, kept beside the contract so they cannot drift from it. */
@@ -123,5 +256,12 @@ export const IPC_CHANNELS = {
   readFile: "spectrace:readFile",
   writeFile: "spectrace:writeFile",
   analyzeVault: "spectrace:analyzeVault",
-  coverage: "spectrace:coverage"
+  coverage: "spectrace:coverage",
+  runAnalysis: "spectrace:runAnalysis",
+  cancelAnalysis: "spectrace:cancelAnalysis",
+  onRunProgress: "spectrace:runProgress",
+  reviewQueue: "spectrace:reviewQueue",
+  applyDecisions: "spectrace:applyDecisions",
+  traceNeighbours: "spectrace:traceNeighbours",
+  defaultReviewer: "spectrace:defaultReviewer"
 } as const satisfies Record<keyof Api, string>;

@@ -31,7 +31,6 @@ import {
   bandFor,
   buildCoverageReport,
   buildLinkIndex,
-  buildRankingPrompt,
   deriveLinkState,
   emptyDecisionLog,
   proposalKey,
@@ -39,15 +38,18 @@ import {
   recordedBands,
   requirementsForSymbol,
   resolveLinks,
+  resolveProposals,
+  ExclusionMatcher,
   reviewStatistics,
   serializeDecisionLog,
   symbolsForRequirement,
   unlinkedRequirements,
   buildTransmissionUnits,
-  countByBand,
   estimateCostUsd,
   evaluateRetrieval,
-  rankCandidates,
+  rankWithBands,
+  projectRankingCost,
+  OUTPUT_TOKENS_PER_CANDIDATE,
   RANKING_PROMPT_VERSION,
   instantiateTemplate,
   isIndexCurrent,
@@ -76,7 +78,10 @@ import {
   type LinkRelationship,
   type MetricsArtifact,
   type ModelPricing,
+  type BandCounts,
   type Proposal,
+  type ProposalStaleness,
+  type RankWithBandsResult,
   type RequirementDocument,
   type SpectraceConfig,
   type RunProvenance,
@@ -85,8 +90,7 @@ import {
   type TransmissionLog
 } from "@spectrace/core";
 import { buildRequirementQueryText, loadRequirements } from "./requirements.js";
-import { DEFAULT_EMBEDDING_MODEL } from "./embedding-provider.js";
-import { createOpenAIRankingProvider, estimateTokens } from "./ranking-provider.js";
+import { DEFAULT_EMBEDDING_MODEL, createOpenAIRankingProvider } from "@spectrace/providers";
 import { headCommit, loadVault, resolveReviewer, writeAcceptedLinks, type LoadedVault } from "./vault.js";
 
 /** `spectrace analyze --proposals` output, as `review` consumes it. */
@@ -751,27 +755,10 @@ program
     const wantsRanking = opts.rank && !opts.dryRun && rankingModel !== undefined;
 
     // AC3's cost half: projected from the assembled payload, with zero calls.
-    // Output tokens are unknowable before the fact, so the projection budgets a
-    // fixed allowance per candidate and says so — a cost estimate that quietly
-    // modelled only input would read low by exactly the expensive half.
-    const OUTPUT_TOKENS_PER_CANDIDATE = 60;
-    const projected = units.reduce(
-      (acc, unit) => {
-        if (unit.candidates.length === 0) return acc;
-        const prompt = buildRankingPrompt(unit);
-        return {
-          calls: acc.calls + 1,
-          inputTokens: acc.inputTokens + estimateTokens(prompt.system) + estimateTokens(prompt.user),
-          outputTokens: acc.outputTokens + unit.candidates.length * OUTPUT_TOKENS_PER_CANDIDATE
-        };
-      },
-      { calls: 0, inputTokens: 0, outputTokens: 0 }
-    );
-    const projectedCostUsd = estimateCostUsd(
-      projected.inputTokens,
-      projected.outputTokens,
-      pricing
-    );
+    // Shared with Studio via core so the number shown before a run is the same
+    // number whichever client shows it (REQ-APP-012 AC2).
+    const projected = projectRankingCost(units, pricing === undefined ? undefined : pricing);
+    const projectedCostUsd = projected.estimatedCostUsd;
 
     let ranking:
       | {
@@ -784,9 +771,9 @@ program
             band: string;
             rationale: string;
           }>;
-          bands: ReturnType<typeof countByBand>;
-          failures: Awaited<ReturnType<typeof rankCandidates>>["failures"];
-          usage: Awaited<ReturnType<typeof rankCandidates>>["usage"];
+          bands: BandCounts;
+          failures: RankWithBandsResult["failures"];
+          usage: RankWithBandsResult["usage"];
           promptVersion: string;
           modelId: string;
           path?: string;
@@ -806,22 +793,21 @@ program
         return;
       }
 
-      const result = await rankCandidates({
+      // Ranking and banding are paired in core, so a proposal's band — which
+      // decides whether it reaches a reviewer at all — cannot differ between
+      // this command and Studio (REQ-CORE-041, REQ-APP-012 AC1).
+      const result = await rankWithBands({
         units,
         provider: createOpenAIRankingProvider({ apiKey, model: rankingModel }),
+        bands: config.bands,
         ...(pricing === undefined ? {} : { pricing })
       });
 
-      const bucketed = result.proposals.map((proposal) => ({
-        ...proposal,
-        band: bandFor(proposal.confidence, proposal.classification, config.bands)
-      }));
+      const bucketed = result.proposals;
 
       ranking = {
         proposals: bucketed,
-        bands: countByBand(
-          bucketed.map((entry) => ({ proposal: entry, band: entry.band, reviewed: false }))
-        ),
+        bands: result.bandCounts,
         failures: result.failures,
         usage: result.usage,
         promptVersion: result.promptVersion,
@@ -873,10 +859,11 @@ program
               // point, and ranking either ran or provably did not.
               modelCalls: ranking?.usage.run.calls ?? 0,
               embeddedTextCount: transmission.audit.embeddedTextCount,
+              // `projected` already carries estimatedCostUsd and priced, in
+              // that order — the key sequence here is unchanged from when they
+              // were spelled out separately.
               projectedRanking: {
                 ...projected,
-                estimatedCostUsd: projectedCostUsd,
-                priced: pricing !== undefined,
                 outputTokensPerCandidate: OUTPUT_TOKENS_PER_CANDIDATE,
                 promptVersion: RANKING_PROMPT_VERSION
               },
@@ -1001,7 +988,9 @@ async function promptForDecisions(
   proposals: readonly Proposal[],
   config: SpectraceConfig,
   log: DecisionLog,
-  symbols: readonly CodeSymbol[]
+  symbols: readonly CodeSymbol[],
+  /** Proposal keys whose symbol is no longer in the index (REQ-CORE-011 AC2). */
+  staleKeys: ReadonlySet<string>
 ): Promise<DecisionBatch> {
   const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -1029,11 +1018,20 @@ async function promptForDecisions(
     for (const [i, entry] of queue.entries()) {
       const { proposal } = entry;
       const symbol = sourceById.get(proposal.symbolId);
+      const stale = staleKeys.has(proposalKey(proposal.requirementId, proposal.symbolId));
       process.stdout.write(
         `\n[${i + 1}/${queue.length}] ${proposal.requirementId} → ${proposal.symbolId}\n` +
-          `  ${entry.band} · ${proposal.classification} · confidence ${proposal.confidence.toFixed(2)}\n` +
+          `  ${entry.band} · ${proposal.classification} · confidence ${proposal.confidence.toFixed(2)}` +
+          `${stale ? " · STALE" : ""}\n` +
           `  ${proposal.rationale}\n`
       );
+      if (stale) {
+        // Shown before the source preview, which for a stale proposal will be
+        // absent anyway — the reviewer should know why before wondering.
+        process.stdout.write(
+          "  ! this symbol is no longer in the index; accepting stores a broken link\n"
+        );
+      }
       if (symbol === undefined) {
         process.stdout.write(
           sourcePreviewHint(symbols.length) + "\n"
@@ -1168,6 +1166,56 @@ program
       return;
     }
 
+    // A proposals artifact outlives the index it was generated against: the
+    // exclusion configuration can change and `index --rebuild` can run between
+    // `analyze` and here. Resolving against the current index is what turns a
+    // proposal for a symbol that no longer exists into a flag rather than a
+    // link that is broken the moment it is written (REQ-CORE-011 AC2).
+    const explicitIndex = opts.index !== undefined;
+    const indexPath = resolve(opts.index ?? join(repo, ".spectrace", "index.jsonl"));
+    let symbols: CodeSymbol[] = [];
+    let staleEntries: ProposalStaleness[] = [];
+    // Non-null exactly when staleness could not be checked, and says why —
+    // silence would read as "nothing is stale", which is a different claim.
+    let stalenessUnchecked: string | null = null;
+
+    if (explicitIndex || existsSync(indexPath)) {
+      try {
+        symbols = readSymbols(indexPath);
+      } catch (error) {
+        // An index the caller named explicitly is a hard requirement; one we
+        // merely found is best-effort, and refusing to review over it would
+        // make a corrupt artifact block work it has no part in.
+        if (explicitIndex) {
+          fail(
+            { error: "unreadable_index", message: error instanceof Error ? error.message : String(error) },
+            1
+          );
+          return;
+        }
+        stalenessUnchecked = `${toPosixPath(indexPath)} could not be read`;
+      }
+    } else {
+      stalenessUnchecked = `no symbol index at ${toPosixPath(indexPath)} — run \`spectrace index\``;
+    }
+
+    if (stalenessUnchecked === null) {
+      const matcher = new ExclusionMatcher({
+        repositoryRoot: repo,
+        additionalPatterns: config.exclude
+      });
+      staleEntries = resolveProposals({
+        proposals: proposalsFile.proposals,
+        knownSymbolIds: new Set(symbols.map((symbol) => symbol.symbolId)),
+        isExcludedPath: (path) => matcher.isExcludedPath(path),
+        repositoryCommit: commit
+      }).stale;
+    }
+
+    const staleKeys = new Set(
+      staleEntries.map((entry) => proposalKey(entry.requirementId, entry.symbolId))
+    );
+
     const decisionsPath = resolve(opts.decisions ?? join(repo, ".spectrace", "decisions.json"));
     let log: DecisionLog = existsSync(decisionsPath)
       ? (JSON.parse(readFileSync(decisionsPath, "utf8")) as DecisionLog)
@@ -1189,19 +1237,7 @@ program
         );
         return;
       }
-      let symbols: CodeSymbol[] = [];
-      if (opts.index !== undefined) {
-        try {
-          symbols = readSymbols(resolve(opts.index));
-        } catch (error) {
-          fail(
-            { error: "unreadable_index", message: error instanceof Error ? error.message : String(error) },
-            1
-          );
-          return;
-        }
-      }
-      batch = await promptForDecisions(proposalsFile.proposals, config, log, symbols);
+      batch = await promptForDecisions(proposalsFile.proposals, config, log, symbols, staleKeys);
     } else {
       try {
         batch = JSON.parse(readFileSync(resolve(opts.decide), "utf8")) as DecisionBatch;
@@ -1279,6 +1315,12 @@ program
         repositoryCommit: commit,
         applied: applied.length,
         skipped,
+        // Every stale proposal is reported, not just the ones decided on this
+        // run: the flag is a fact about the queue, and a consumer polling for
+        // work needs to see it before anyone touches the entry.
+        stale: staleEntries,
+        stalenessCheckedAgainst: stalenessUnchecked === null ? toPosixPath(indexPath) : null,
+        stalenessUnchecked,
         decisions: log.decisions.length,
         links: links.length,
         statistics: stats,
@@ -1295,6 +1337,15 @@ program
         `override rate ${(stats.overrideRate * 100).toFixed(1)}% over ${stats.decided} decided ` +
           `(${stats.auditEntries} audit entries).\n`
       );
+      if (stalenessUnchecked !== null) {
+        process.stdout.write(`staleness not checked: ${stalenessUnchecked}.\n`);
+      } else if (staleEntries.length > 0) {
+        const excluded = staleEntries.filter((entry) => entry.reason === "excluded").length;
+        process.stdout.write(
+          `${staleEntries.length} stale proposal(s) — ${excluded} removed by an exclusion pattern, ` +
+            `${staleEntries.length - excluded} missing from the repository (REQ-CORE-011).\n`
+        );
+      }
       process.stdout.write(`${toPosixPath(decisionsPath)}\n${toPosixPath(written.indexPath)}\n`);
     }
   });

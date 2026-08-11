@@ -56,18 +56,11 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRetryableStatus = (status: number) => status === 429 || status >= 500;
 
 /**
- * Rough token estimate for a text, used only where a real count is
- * unavailable: the `--dry-run` cost projection, which by definition has made
- * no call and therefore has no `usage` block to read.
- *
- * Four characters per token is the widely used English approximation. It is
- * reported as an estimate everywhere it surfaces and never substituted for a
- * measured count — REQ-CORE-032's ledger records what the provider reported,
- * and this number never enters it.
+ * Re-exported from core, where the cost projection that uses it now lives
+ * (REQ-APP-012 AC2). Kept on this module's surface because callers and tests
+ * already reach for it beside the provider it estimates for.
  */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
+export { estimateTokens } from "@spectrace/core";
 
 export function createOpenAIRankingProvider(options: OpenAIRankingOptions): RankingProvider {
   const doFetch = options.fetchImpl ?? fetch;

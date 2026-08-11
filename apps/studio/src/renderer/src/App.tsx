@@ -7,7 +7,26 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { Editor } from "./Editor";
+import { RunPanel } from "./RunPanel";
+import { CoverageDashboard } from "./CoverageDashboard";
+import { ReviewQueue } from "./ReviewQueue";
+import { TracePanes } from "./TracePanes";
 import type { VaultAnalysis, VaultDirectory, VaultSummary } from "../../shared/ipc";
+
+/**
+ * The four surfaces, each mapping to one requirement. Kept as sibling views
+ * rather than panes because analysis, triage, and editing are different tasks
+ * with different keyboard grammars — the queue binds `a`/`r`/`d`/`s`, which
+ * would fight the editor for every keystroke if both were live at once.
+ */
+type View = "edit" | "run" | "coverage" | "review";
+
+const VIEWS: Array<{ id: View; label: string; requirement: string }> = [
+  { id: "edit", label: "Edit", requirement: "REQ-APP-001…004" },
+  { id: "run", label: "Analysis", requirement: "REQ-APP-012" },
+  { id: "review", label: "Review", requirement: "REQ-APP-013" },
+  { id: "coverage", label: "Coverage", requirement: "REQ-APP-020" }
+];
 
 /**
  * How long after the last keystroke the vault is re-analyzed.
@@ -81,6 +100,7 @@ export function App(): JSX.Element {
   const [preview, setPreview] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [view, setView] = useState<View>("edit");
 
   const dirty = buffer !== savedContent;
 
@@ -164,6 +184,10 @@ export function App(): JSX.Element {
   }, [vault, selected, buffer, dirty, runAnalysis]);
 
   useEffect(() => {
+    // Save is bound only on the editing surface. The queue owns single-letter
+    // keys, and a stray Ctrl+S there should not write a buffer nobody is
+    // looking at.
+    if (view !== "edit") return;
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -172,7 +196,18 @@ export function App(): JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save]);
+  }, [save, view]);
+
+  /** Opens the document a requirement ID lives in, for the coverage table's links. */
+  const openRequirement = useCallback(
+    (requirementId: string) => {
+      const match = analysis?.requirements.find((r) => r.id === requirementId);
+      if (!match) return;
+      setView("edit");
+      void openFile(match.path);
+    },
+    [analysis, openFile]
+  );
 
   const documentViolations = useMemo(
     () => (analysis && selected ? analysis.violations.filter((v) => v.path === selected) : []),
@@ -210,8 +245,22 @@ export function App(): JSX.Element {
             {vault.root} · {vault.fileCount} markdown file{vault.fileCount === 1 ? "" : "s"}
           </span>
         )}
+        {vault && (
+          <nav className="views" aria-label="Surfaces">
+            {VIEWS.map((option) => (
+              <button
+                key={option.id}
+                className={`view-tab${view === option.id ? " selected" : ""}`}
+                title={option.requirement}
+                onClick={() => setView(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </nav>
+        )}
         <span className="spacer" />
-        {selected && (
+        {view === "edit" && selected && (
           <>
             <label className="toggle">
               <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} />
@@ -233,7 +282,17 @@ export function App(): JSX.Element {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="body">
+      {vault && view !== "edit" && (
+        <div className="surface">
+          {view === "run" && <RunPanel root={vault.root} />}
+          {view === "coverage" && (
+            <CoverageDashboard root={vault.root} onOpenRequirement={openRequirement} />
+          )}
+          {view === "review" && <ReviewQueue root={vault.root} />}
+        </div>
+      )}
+
+      <div className="body" hidden={vault !== null && view !== "edit"}>
         <nav className="sidebar">
           {vault ? (
             <>
@@ -311,6 +370,12 @@ export function App(): JSX.Element {
                 <p className="empty">Not a requirement document.</p>
               </section>
             )}
+
+            {/* Trace links (REQ-APP-014) come from the link index; the
+                wiki-links below are an editor affordance and a different
+                relationship entirely. Keeping them in separate sections stops
+                a reader reading one as the other. */}
+            {vault && <TracePanes root={vault.root} requirementId={requirement?.id ?? null} />}
 
             <section>
               <h2>Backlinks{backlinks.length > 0 && <span className="count">{backlinks.length}</span>}</h2>

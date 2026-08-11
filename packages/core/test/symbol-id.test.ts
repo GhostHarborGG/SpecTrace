@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assignSymbolIds, hashSignature, type SymbolIdCandidate } from "../src/indexer/symbol-id.js";
+import {
+  assignSymbolIds,
+  hashSignature,
+  symbolIdPath,
+  type SymbolIdCandidate
+} from "../src/indexer/symbol-id.js";
 
 describe("assignSymbolIds", () => {
   it("builds the spec §8.3 format for a unique symbol", () => {
@@ -96,5 +101,31 @@ describe("assignSymbolIds", () => {
     const a = hashSignature({ parameterTypes: ["string", "number"], returnType: "void" });
     const b = hashSignature({ parameterTypes: ["  string", "number  "], returnType: " void " });
     expect(a).toBe(b);
+  });
+});
+
+describe("symbolIdPath", () => {
+  it("recovers the path from an ID the assigner produced", () => {
+    const { ids } = assignSymbolIds([
+      { relativePath: "src/deep/nested/module.ts", qualifiedName: "Thing.method", kind: "method" }
+    ]);
+    expect(symbolIdPath(ids[0]!)).toBe("src/deep/nested/module.ts");
+  });
+
+  it("round-trips every kind, including overload-disambiguated IDs", () => {
+    const candidates: SymbolIdCandidate[] = [
+      { relativePath: "src/a.ts", qualifiedName: "alpha", kind: "function" },
+      { relativePath: "src/a.ts", qualifiedName: "Klass", kind: "class" },
+      { relativePath: "src/b.ts", qualifiedName: "over", kind: "function", signature: { parameterTypes: ["string"], returnType: "void" } },
+      { relativePath: "src/b.ts", qualifiedName: "over", kind: "function", signature: { parameterTypes: ["number"], returnType: "void" } }
+    ];
+    const { ids } = assignSymbolIds(candidates);
+    expect(ids.map(symbolIdPath)).toEqual(["src/a.ts", "src/a.ts", "src/b.ts", "src/b.ts"]);
+  });
+
+  it("returns null for strings that are not symbol IDs", () => {
+    for (const bad of ["", "plain-text", "ts:", "ts:#name:function", "#name", "no-hash:src/a.ts"]) {
+      expect(symbolIdPath(bad)).toBeNull();
+    }
   });
 });

@@ -373,3 +373,145 @@ describe("spectrace coverage (REQ-CLI-007)", () => {
     expect(normalized).toEqual(JSON.parse(readFileSync(snapshotPath, "utf8")));
   });
 });
+
+/**
+ * REQ-CORE-011 AC2 end-to-end: the exclusion is added *after* the proposals
+ * exist, which is the only ordering under which the criterion means anything.
+ * A proposal generated against an index that already excluded the symbol
+ * could never have been generated at all.
+ */
+describe("REQ-CORE-011 AC2: exclusions flag proposals stale", () => {
+  let excl: string;
+  const KEPT = "ts:src/keep.ts#kept:function";
+  const EXCLUDED = "ts:src/apiclient/api.ts#fetchUser:function";
+  const DOOMED = "ts:src/doomed.ts#doomed:function";
+
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", excl, "-c", "user.email=t@example.com", "-c", "user.name=Test", ...args], {
+      encoding: "utf8"
+    });
+
+  const reviewJson = (extra: string[] = []) => {
+    const batch = path.join(excl, "noop-batch.json");
+    writeFileSync(batch, JSON.stringify({ decisions: [] }), "utf8");
+    const { stdout, status } = run([
+      "review",
+      "--repo", excl,
+      "--proposals", path.join(excl, "proposals.json"),
+      "--decide", batch,
+      "--reviewer", "bp",
+      "--json",
+      ...extra
+    ]);
+    expect(status).toBe(0);
+    return JSON.parse(stdout);
+  };
+
+  beforeAll(() => {
+    excl = mkdtempSync(path.join(tmpdir(), "spectrace-exclusions-"));
+    mkdirSync(path.join(excl, "specs", "requirements"), { recursive: true });
+    mkdirSync(path.join(excl, "src", "apiclient"), { recursive: true });
+    writeFileSync(
+      path.join(excl, "specs", "requirements", "REQ-E-001.md"),
+      requirementDoc("REQ-E-001", "Fetch a user"),
+      "utf8"
+    );
+    writeFileSync(path.join(excl, "src", "keep.ts"), "export function kept(): number {\n  return 1;\n}\n");
+    writeFileSync(path.join(excl, "src", "doomed.ts"), "export function doomed(): number {\n  return 2;\n}\n");
+    writeFileSync(
+      path.join(excl, "src", "apiclient", "api.ts"),
+      "export function fetchUser(): string {\n  return \"u\";\n}\n"
+    );
+    git("init", "--quiet");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "fixture");
+
+    // Proposals reference all three, as an `analyze` run before any exclusion
+    // existed would have produced.
+    writeFileSync(
+      path.join(excl, "proposals.json"),
+      JSON.stringify({
+        artifact: "spectrace.proposals",
+        version: 1,
+        proposals: [KEPT, EXCLUDED, DOOMED].map((symbolId, i) => ({
+          requirementId: "REQ-E-001",
+          symbolId,
+          rank: i + 1,
+          classification: "implements",
+          confidence: 0.9,
+          rationale: "Generated before the exclusion existed."
+        }))
+      }),
+      "utf8"
+    );
+
+    run(["index", "--repo", excl, "--rebuild"]);
+  });
+
+  afterAll(() => rmSync(excl, { recursive: true, force: true }));
+
+  it("flags nothing while every proposed symbol is still indexed", () => {
+    const report = reviewJson();
+    expect(report.stale).toEqual([]);
+    expect(report.stalenessUnchecked).toBeNull();
+    expect(report.stalenessCheckedAgainst).toContain(".spectrace/index.jsonl");
+  });
+
+  it("AC2: adding an exclusion pattern and re-indexing flags the affected proposal stale", () => {
+    mkdirSync(path.join(excl, ".spectrace"), { recursive: true });
+    writeFileSync(
+      path.join(excl, ".spectrace", "config.yaml"),
+      "exclude:\n  - src/apiclient/\n",
+      "utf8"
+    );
+    run(["index", "--repo", excl, "--rebuild"]);
+
+    const report = reviewJson();
+    const flagged = report.stale.find((entry: { symbolId: string }) => entry.symbolId === EXCLUDED);
+    expect(flagged).toMatchObject({
+      requirementId: "REQ-E-001",
+      stale: true,
+      reason: "excluded",
+      path: "src/apiclient/api.ts"
+    });
+    // The unaffected proposal is untouched — the flag is about the exclusion,
+    // not about the artifact being old.
+    expect(report.stale.map((e: { symbolId: string }) => e.symbolId)).not.toContain(KEPT);
+  });
+
+  it("distinguishes a deleted symbol from an excluded one", () => {
+    rmSync(path.join(excl, "src", "doomed.ts"));
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "delete doomed");
+    run(["index", "--repo", excl, "--rebuild"]);
+
+    const report = reviewJson();
+    const byId = new Map(
+      report.stale.map((e: { symbolId: string; reason: string }) => [e.symbolId, e.reason])
+    );
+    expect(byId.get(EXCLUDED)).toBe("excluded");
+    expect(byId.get(DOOMED)).toBe("missing");
+  });
+
+  it("reports staleness as unchecked, not as clean, when no index exists", () => {
+    rmSync(path.join(excl, ".spectrace", "index.jsonl"));
+    const report = reviewJson();
+    expect(report.stale).toEqual([]);
+    expect(report.stalenessCheckedAgainst).toBeNull();
+    expect(report.stalenessUnchecked).toContain("no symbol index");
+  });
+
+  it("still fails loudly when an explicitly named --index is unreadable", () => {
+    const { status, stderr } = run([
+      "review",
+      "--repo", excl,
+      "--proposals", path.join(excl, "proposals.json"),
+      "--decide", path.join(excl, "noop-batch.json"),
+      "--reviewer", "bp",
+      "--index", path.join(excl, "no-such-index.jsonl"),
+      "--json"
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stderr).error).toBe("unreadable_index");
+  });
+});

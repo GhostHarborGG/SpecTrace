@@ -38,6 +38,17 @@ export interface Requirement {
   status: RequirementStatus;
   /** Resolved, never absent: omitted frontmatter yields DEFAULT_REQUIREMENT_PRIORITY. */
   priority: RequirementPriority;
+  /**
+   * From frontmatter `statement` or a `## Statement` body section; absent if
+   * neither (REQ-CORE-001, amended 2026-08-10).
+   *
+   * Optional rather than required so no existing document became invalid on
+   * the amendment, but it is the single most useful field retrieval has: it is
+   * the sentence describing what the system shall do, which is what a symbol's
+   * documentation and signature are being matched against. A requirement
+   * without one retrieves on its title and acceptance criteria alone.
+   */
+  statement?: string;
   /** From frontmatter `rationale` or a `## Rationale` body section; absent if neither. */
   rationale?: string;
   /** At least one entry is enforced by validation (REQ-CORE-002). */

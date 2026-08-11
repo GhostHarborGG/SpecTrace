@@ -83,4 +83,30 @@ export class ExclusionMatcher {
     if (contentSample && GENERATED_MARKER_PATTERN.test(contentSample)) return true;
     return false;
   }
+
+  /**
+   * Whether a file path would be excluded from indexing, accounting for every
+   * directory above it (REQ-CORE-011).
+   *
+   * {@link isExcludedFile} answers only about the path itself, because the
+   * walk in `collectSourceFiles` has already pruned excluded directories
+   * before it ever reaches a file. A caller holding a bare path has had no
+   * such walk — `src/generated/api.ts` is excluded by virtue of `generated/`,
+   * and asking about the file alone would miss that. So this checks each
+   * ancestor directory as well.
+   *
+   * It takes no content sample and therefore cannot see a `@generated` marker
+   * comment: the file may no longer exist, which is the usual reason for
+   * asking. This answers "do the configured patterns exclude this path",
+   * which is the question a stale-proposal check needs (REQ-CORE-011 AC2).
+   */
+  isExcludedPath(relativePath: string): boolean {
+    if (this.isExcludedFile(relativePath)) return true;
+
+    const segments = relativePath.split("/");
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      if (this.isExcludedDirectory(segments.slice(0, depth).join("/"))) return true;
+    }
+    return false;
+  }
 }

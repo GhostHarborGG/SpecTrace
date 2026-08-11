@@ -127,3 +127,31 @@ export function assignSymbolIds(candidates: readonly SymbolIdCandidate[]): {
 
   return { ids, duplicates };
 }
+
+/**
+ * Recovers the repository-relative POSIX path from a symbol identifier, or
+ * `null` if the string does not have the `<language>:<path>#<name>:<kind>`
+ * shape {@link assignSymbolIds} produces.
+ *
+ * This is the inverse of the `path` half of the grammar and nothing more. It
+ * exists so a caller holding only an ID — a stored link, a proposal in an
+ * artifact written by an earlier run — can ask a path question about it
+ * without loading the index the ID came from. That matters for exclusions
+ * (REQ-CORE-011 AC2): once a pattern removes a file, its symbols are gone from
+ * the index, so the index can no longer answer where they used to live.
+ *
+ * Returns `null` rather than throwing, and returns `null` on an empty path.
+ * The input is frequently untrusted — hand-edited frontmatter, an artifact
+ * from a different engine version — and a malformed ID is a fact about the
+ * data to be reported, not a crash.
+ */
+export function symbolIdPath(symbolId: string): string | null {
+  const languageSeparator = symbolId.indexOf(":");
+  if (languageSeparator <= 0) return null;
+
+  const nameSeparator = symbolId.indexOf("#", languageSeparator + 1);
+  if (nameSeparator === -1) return null;
+
+  const path = symbolId.slice(languageSeparator + 1, nameSeparator);
+  return path.length > 0 ? path : null;
+}
