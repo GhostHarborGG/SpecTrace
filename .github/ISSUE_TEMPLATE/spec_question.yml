@@ -1,0 +1,40 @@
+name: Spec question or ambiguity
+description: A requirement is unclear, contradictory, or doesn't say what it needs to.
+labels: ["spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `specs/` is authoritative and public, and an ambiguous requirement is a
+        defect in the requirement — not a question you should have to guess at.
+        These are welcome even while code contributions are paused.
+
+  - type: input
+    id: req-id
+    attributes:
+      label: Requirement ID
+      description: The file in `specs/requirements/`, or the narrative spec section.
+      placeholder: REQ-CORE-023 (or SPEC-CLI-000 §10)
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What's unclear
+      description: Quote the wording that's doing the ambiguous work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: readings
+    attributes:
+      label: The readings you can see
+      description: >
+        If two interpretations lead to different implementations, spelling both
+        out is the fastest path to a fix.
+      placeholder: |
+        Reading A: ...
+        Reading B: ...
+    validations:
+      required: false

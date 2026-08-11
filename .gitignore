@@ -11,6 +11,20 @@ Thumbs.db
 # IDE
 .idea/
 
+# Machine-local Claude Code permissions (settings.json is the shared file).
+# Most machines catch this via a global gitignore; pinned here so the repo does
+# not depend on that being configured.
+.claude/settings.local.json
+
+# Ground-truth link labels (BP, 2026-08-11): untracked ahead of the public
+# release and republished with the capstone write-up at v1.0.0. Two reasons —
+# the blinding wall (CLAUDE.md rule 1) stops being mechanically enforceable
+# once anyone can fork and send retrieval code, and the labels are the answer
+# key to an evaluation that has not been published yet. The files stay on disk;
+# evaluation runs are unaffected. Note this does NOT remove them from the git
+# history that predates this line.
+fixtures/ground-truth/
+
 # Run artifacts (rebuildable per REQ-CORE-071; promote keepers to a results
 # package deliberately instead of committing working runs)
 runs/

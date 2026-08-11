@@ -11,7 +11,7 @@ as the repository evolves.
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![pnpm](https://img.shields.io/badge/pnpm-10.14-f69220?logo=pnpm&logoColor=white)](https://pnpm.io)
-[![License](https://img.shields.io/badge/license-not%20yet%20licensed-lightgrey)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 > **Status: pre-1.0, under active development.** The engine, CLI, and desktop
 > app are being built requirement by requirement against a frozen
@@ -318,6 +318,7 @@ specs/            The specification vault — and the dogfood target.
                   requirements/ holds one file per requirement; the
                   *-spec.md documents are narrative indexes.
 fixtures/         Evaluation repositories and frozen experiment inputs.
+                  ground-truth/ is withheld until v1.0.0 (see Research context).
 docs/             Feasibility error analysis, AI-collaboration log.
 scripts/          spec-index.mjs — generates and checks the spec tables.
 ```
@@ -377,9 +378,12 @@ Windows, and macOS for every push to `main` and every pull request.
   the filesystem boundary only.
 - Everything returned from core survives `structuredClone` (Electron IPC).
 
-Contributions are not being accepted while the capstone evaluation is running —
-the research design requires a controlled development record. That changes at
-`v1.0.0`.
+Code contributions are paused while the capstone evaluation is running — the
+research design requires a controlled development record. That changes at
+`v1.0.0`. Bug reports, spec ambiguities, and reproduction failures are welcome
+now; see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through
+[SECURITY.md](SECURITY.md), never a public issue. Participation is governed by
+the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## Research context
 
@@ -395,7 +399,13 @@ Two disciplines are enforced mechanically rather than by policy:
   stay out of every AI-assisted development session — enforced by
   `.claudeignore` and a hard rule in `CLAUDE.md`. Only aggregate metrics are
   ever read back during development. Retrieval code is never tuned against
-  labels it can see.
+  labels it can see. The labels themselves are **withheld from this repository
+  until `v1.0.0`**, when they publish alongside the write-up: once anyone can
+  fork and send retrieval code, the blinding wall stops being mechanically
+  enforceable, and the labels are the answer key to an evaluation that hasn't
+  been published yet. Everything needed to reproduce the *pipeline* is here —
+  the frozen corpus, the requirements, the index artifact, and the evaluation
+  harness. Only the answer key is late.
 - **Disclosed AI collaboration.** This project is built with AI assistance as a
   stated methodology, logged task by task with its extent (scaffold, draft,
   review, pair-design) in [`docs/ai-assistance.md`](docs/ai-assistance.md).
@@ -403,8 +413,19 @@ Two disciplines are enforced mechanically rather than by policy:
 
 ## License
 
-Not yet licensed. All rights reserved pending a licensing decision at public
-release. If you want to use SpecTrace before then, open an issue.
+Licensed under the [Apache License, Version 2.0](LICENSE). Use it, modify it,
+and ship it commercially — keep the copyright and license notices, state your
+changes, and pass along [`NOTICE`](NOTICE) with any redistribution.
+
+Two pieces of this repository carry different terms, both listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md): the experiment index
+artifact derived from [unjs/hookable](https://github.com/unjs/hookable) (MIT),
+and `fixtures/todo-example/` (MIT, so it can be lifted into other repositories
+freely).
+
+Note the contribution terms above: while the capstone evaluation is running,
+external contributions aren't being accepted. The license is open regardless —
+you can fork and build on SpecTrace today.
 
 ---
 
