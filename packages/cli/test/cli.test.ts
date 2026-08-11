@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -15,11 +16,18 @@ import { buildRequirementQueryText, loadRequirements } from "../src/requirements
 
 const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "index.ts");
 
+// Run tsx's CLI under this Node directly rather than shelling out to `npx`.
+// pnpm exports npm_config_verify_deps_before_run, npm warns on the unrecognized
+// key, and that warning lands in the stdout these tests parse as JSON — most
+// visibly on the error paths that pass a replacement env. Spawning the resolved
+// binary keeps npm out of the pipe entirely, and drops the Windows `shell: true`
+// that was only needed to invoke npx's .cmd shim.
+const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
+
 function run(args: string[], env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
   try {
-    const stdout = execFileSync("npx", ["tsx", entry, ...args], {
+    const stdout = execFileSync(process.execPath, [tsxCli, entry, ...args], {
       encoding: "utf8",
-      shell: process.platform === "win32",
       ...(env ? { env } : {})
     });
     return { stdout, stderr: "", status: 0 };

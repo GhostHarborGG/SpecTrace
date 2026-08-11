@@ -1,0 +1,50 @@
+name: Reproduction failure
+description: A documented evaluation figure doesn't reproduce on your machine.
+labels: ["reproduction", "research"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable issue you can file. SpecTrace publishes
+        retrieval-quality, cost, and drift figures with their methodology; a
+        number that doesn't reproduce is a finding.
+
+        Note that ground-truth link labels are withheld until the capstone
+        write-up publishes, so metrics requiring them can't be reproduced
+        externally yet — see
+        [THIRD-PARTY-NOTICES.md](https://github.com/GhostHarborGG/SpecTrace/blob/main/THIRD-PARTY-NOTICES.md)
+        and the README's Research context section. File anyway if you got a
+        different number on anything that *is* reproducible.
+
+  - type: input
+    id: figure
+    attributes:
+      label: Which figure
+      description: Where it's documented, and what it claims.
+      placeholder: "README Phase C: overall R@10 .917 on the frozen hookable corpus"
+    validations:
+      required: true
+
+  - type: input
+    id: got
+    attributes:
+      label: What you got instead
+      placeholder: R@10 .833
+    validations:
+      required: true
+
+  - type: textarea
+    id: how
+    attributes:
+      label: How you ran it
+      description: Exact commands, config, and the index artifact's header if you have it.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node, pnpm, commit
+      placeholder: Windows 11 · Node 22.14.0 · pnpm 10.14.0 · main @ c0da523
+    validations:
+      required: true

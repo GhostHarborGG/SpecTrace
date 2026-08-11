@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -8,11 +9,14 @@ import path from "node:path";
 const entry = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "index.ts");
 const snapshotDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "snapshots");
 
+// See cli.test.ts: `npx` lets npm's "Unknown env config" warning into the stdout
+// these tests parse as JSON. Spawn tsx's resolved CLI under this Node instead.
+const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
+
 function run(args: string[], env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
   try {
-    const stdout = execFileSync("npx", ["tsx", entry, ...args], {
+    const stdout = execFileSync(process.execPath, [tsxCli, entry, ...args], {
       encoding: "utf8",
-      shell: process.platform === "win32",
       ...(env ? { env } : {})
     });
     return { stdout, stderr: "", status: 0 };

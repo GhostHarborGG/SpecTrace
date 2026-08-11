@@ -1,0 +1,96 @@
+name: Bug report
+description: Something behaves differently than the spec says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. SpecTrace is pre-1.0, so "this is unfinished" is
+        often the answer — check the requirement's `status` in
+        `specs/requirements/` before filing, and mention it below if you found it.
+
+        **Security issues don't go here** — see
+        [SECURITY.md](https://github.com/GhostHarborGG/SpecTrace/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the exact command and its full output where relevant.
+      placeholder: |
+        $ pnpm cli analyze --req REQ-CORE-020
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: If a requirement says otherwise, cite it — that makes this unambiguous.
+      placeholder: REQ-CORE-012 AC1 says a rebuild is byte-identical, but ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        The smallest repository or spec vault that triggers it. A link beats a
+        description. If it only reproduces on your own vault, say so — that's
+        still useful, it just changes how it gets triaged.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: main @ c0da523
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      options:
+        - CLI (@spectrace/cli)
+        - Studio (Electron app)
+        - Engine, used as a library (@spectrace/core)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node, pnpm
+      description: "`node -v` and `pnpm -v`. The OS matters more than usual here — path separators and line endings are load-bearing."
+      placeholder: macOS 15.2 · Node 22.14.0 · pnpm 10.14.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: retrieval-mode
+    attributes:
+      label: Retrieval mode
+      description: From `.spectrace/config.yaml`, or whatever you passed on the command line.
+      options:
+        - lexical (Configuration A — the default)
+        - semantic (Configuration B)
+        - hybrid (Configuration C)
+        - Not applicable
+    validations:
+      required: false
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else
+      description: >
+        Please scrub API keys and anything proprietary from pasted output before
+        posting. Requirement text and file paths from a private vault count.
+    validations:
+      required: false
