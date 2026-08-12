@@ -144,6 +144,7 @@ must match an equivalent CLI invocation at the same core version.
 | [REQ-APP-012](requirements/REQ-APP-012.md) | Run analysis (index, retrieve, rank) | P0 | partial |
 | [REQ-APP-013](requirements/REQ-APP-013.md) | Link review queue | P0 | partial |
 | [REQ-APP-014](requirements/REQ-APP-014.md) | Bidirectional navigation | P0 | partial |
+| [REQ-APP-015](requirements/REQ-APP-015.md) | Link a local repository directory | P0 | implemented |
 <!-- spectrace:end -->
 
 ### 4.3 Status: coverage and drift

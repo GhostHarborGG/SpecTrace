@@ -27,7 +27,14 @@ const VERDICT_KEYS: Record<string, Verdict> = {
   s: "skip"
 };
 
-export function ReviewQueue({ root }: { root: string }): JSX.Element {
+export function ReviewQueue({
+  root,
+  repositoryRoot
+}: {
+  root: string;
+  /** The linked code repository (REQ-APP-015); undefined, the vault is the repository. */
+  repositoryRoot: string | undefined;
+}): JSX.Element {
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null);
   const [cursor, setCursor] = useState(0);
   const [verdicts, setVerdicts] = useState<Map<string, { kind: Verdict; redirectTo?: string }>>(new Map());
@@ -42,7 +49,7 @@ export function ReviewQueue({ root }: { root: string }): JSX.Element {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const next = await window.api.reviewQueue(root);
+      const next = await window.api.reviewQueue(root, repositoryRoot);
       setSnapshot(next);
       setCursor(0);
       setVerdicts(new Map());
@@ -53,7 +60,7 @@ export function ReviewQueue({ root }: { root: string }): JSX.Element {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [root]);
+  }, [root, repositoryRoot]);
 
   useEffect(() => {
     void load();
@@ -119,6 +126,7 @@ export function ReviewQueue({ root }: { root: string }): JSX.Element {
     try {
       const result = await window.api.applyDecisions({
         root,
+        ...(repositoryRoot === undefined ? {} : { repositoryRoot }),
         reviewer: reviewer.trim(),
         decisions: [...verdicts.entries()].map(([composite, verdict]) => {
           const [requirementId, symbolId] = composite.split(" ") as [string, string];
@@ -140,7 +148,7 @@ export function ReviewQueue({ root }: { root: string }): JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [verdicts, reviewer, root, load]);
+  }, [verdicts, reviewer, root, repositoryRoot, load]);
 
   if (error) return <div className="error">{error}</div>;
   if (!snapshot) return <p className="empty">Loading queue…</p>;

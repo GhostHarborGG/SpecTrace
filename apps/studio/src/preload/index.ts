@@ -8,11 +8,15 @@ import { IPC_CHANNELS, type Api, type RunProgress } from "../shared/ipc.js";
 const api: Api = {
   chooseVault: () => ipcRenderer.invoke(IPC_CHANNELS.chooseVault),
   openVault: (directory) => ipcRenderer.invoke(IPC_CHANNELS.openVault, directory),
+  chooseRepository: (vaultRoot) => ipcRenderer.invoke(IPC_CHANNELS.chooseRepository, vaultRoot),
+  linkedRepository: (vaultRoot) => ipcRenderer.invoke(IPC_CHANNELS.linkedRepository, vaultRoot),
+  unlinkRepository: (vaultRoot) => ipcRenderer.invoke(IPC_CHANNELS.unlinkRepository, vaultRoot),
   readFile: (root, relativePath) => ipcRenderer.invoke(IPC_CHANNELS.readFile, root, relativePath),
   writeFile: (root, relativePath, content) =>
     ipcRenderer.invoke(IPC_CHANNELS.writeFile, root, relativePath, content),
   analyzeVault: (root, overrides) => ipcRenderer.invoke(IPC_CHANNELS.analyzeVault, root, overrides),
-  coverage: (root, symbolIndexPath) => ipcRenderer.invoke(IPC_CHANNELS.coverage, root, symbolIndexPath),
+  coverage: (root, symbolIndexPath, repositoryRoot) =>
+    ipcRenderer.invoke(IPC_CHANNELS.coverage, root, symbolIndexPath, repositoryRoot),
   runAnalysis: (request) => ipcRenderer.invoke(IPC_CHANNELS.runAnalysis, request),
   cancelAnalysis: () => ipcRenderer.invoke(IPC_CHANNELS.cancelAnalysis),
   onRunProgress: (listener) => {
@@ -23,10 +27,10 @@ const api: Api = {
     ipcRenderer.on(IPC_CHANNELS.onRunProgress, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.onRunProgress, handler);
   },
-  reviewQueue: (root) => ipcRenderer.invoke(IPC_CHANNELS.reviewQueue, root),
+  reviewQueue: (root, repositoryRoot) => ipcRenderer.invoke(IPC_CHANNELS.reviewQueue, root, repositoryRoot),
   applyDecisions: (request) => ipcRenderer.invoke(IPC_CHANNELS.applyDecisions, request),
-  traceNeighbours: (root, requirementId, symbolId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.traceNeighbours, root, requirementId, symbolId),
+  traceNeighbours: (root, requirementId, symbolId, repositoryRoot) =>
+    ipcRenderer.invoke(IPC_CHANNELS.traceNeighbours, root, requirementId, symbolId, repositoryRoot),
   defaultReviewer: (root) => ipcRenderer.invoke(IPC_CHANNELS.defaultReviewer, root)
 };
 

@@ -35,8 +35,10 @@ import {
 } from "@spectrace/core";
 
 export interface RepositoryState {
-  /** Absolute path of the repository holding `.spectrace/` and the vault. */
+  /** Absolute path of the vault: requirements, configuration, and `.spectrace/`. */
   root: string;
+  /** Linked code repository; absent, the vault serves (REQ-APP-015 AC3). Read-only. */
+  repositoryRoot?: string;
   /** Optional symbol index; supplied, links are resolved and staleness reported. */
   indexPath?: string;
 }
@@ -81,7 +83,10 @@ export function readVaultLinkState(state: RepositoryState): VaultLinkState {
   }
 
   const report = validateRequirements(documents);
-  const repositoryCommit = headCommit(root);
+  // The commit is the code's, not the vault's: a trace link asserts something
+  // about the repository at a commit, and with a linked repository the vault's
+  // own history is the wrong one to stamp (REQ-APP-015 AC1).
+  const repositoryCommit = headCommit(resolve(state.repositoryRoot ?? root));
 
   return {
     requirements: report.requirements,

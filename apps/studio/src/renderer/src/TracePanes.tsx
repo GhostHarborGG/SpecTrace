@@ -12,9 +12,12 @@ import type { TraceNeighbours } from "../../shared/ipc";
 
 export function TracePanes({
   root,
+  repositoryRoot,
   requirementId
 }: {
   root: string;
+  /** The linked code repository (REQ-APP-015); undefined, the vault is the repository. */
+  repositoryRoot: string | undefined;
   requirementId: string | null;
 }): JSX.Element {
   const [neighbours, setNeighbours] = useState<TraceNeighbours | null>(null);
@@ -26,7 +29,7 @@ export function TracePanes({
     let cancelled = false;
     void (async () => {
       try {
-        const next = await window.api.traceNeighbours(root, requirementId ?? undefined, undefined);
+        const next = await window.api.traceNeighbours(root, requirementId ?? undefined, undefined, repositoryRoot);
         if (!cancelled) setNeighbours(next);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
@@ -35,19 +38,19 @@ export function TracePanes({
     return () => {
       cancelled = true;
     };
-  }, [root, requirementId]);
+  }, [root, repositoryRoot, requirementId]);
 
   const runLookup = useCallback(async () => {
     const symbolId = lookup.trim();
     if (symbolId.length === 0) return;
     setError(null);
     try {
-      const result = await window.api.traceNeighbours(root, undefined, symbolId);
+      const result = await window.api.traceNeighbours(root, undefined, symbolId, repositoryRoot);
       setLookedUp({ symbolId, requirements: result.requirements });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [root, lookup]);
+  }, [root, repositoryRoot, lookup]);
 
   const unlinked = neighbours?.unlinked ?? [];
   const isUnlinked = requirementId !== null && unlinked.includes(requirementId);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { RankingProvider, RankingRequest, RankingResponse } from "@spectrace/core";
@@ -228,6 +228,78 @@ describe("REQ-APP-012 AC3: cancellation leaves completed stages intact", () => {
     await runAnalysis({ root: repo, queries, rankingProvider: fakeProvider() });
     const written = JSON.parse(readFileSync(artifactPaths(repo).proposals, "utf8"));
     expect(written.partial).toBeUndefined();
+  });
+});
+
+describe("REQ-APP-015: a linked repository directory", () => {
+  /** Every path under `dir`, sorted — the whole-tree fingerprint AC2 compares. */
+  const listing = (dir: string): string[] =>
+    (readdirSync(dir, { recursive: true }) as string[]).map(String).sort();
+
+  let vault: string;
+
+  beforeEach(() => {
+    // A vault that is nothing but documents: no source, no git history. If a
+    // run's provenance ever came from here it would read `unknown`, which is
+    // what makes AC1's commit assertion a real discriminator.
+    vault = mkdtempSync(path.join(tmpdir(), "spectrace-vault-"));
+    mkdirSync(path.join(vault, "specs", "requirements"), { recursive: true });
+    writeFileSync(
+      path.join(vault, "specs", "requirements", "REQ-S-001.md"),
+      requirementDoc("REQ-S-001", "Load configuration"),
+      "utf8"
+    );
+  });
+
+  afterEach(() => rmSync(vault, { recursive: true, force: true }));
+
+  it("AC1: indexes the repository's source and stamps the repository's commit", async () => {
+    const result = await runAnalysis({ root: vault, repositoryRoot: repo, queries });
+
+    // The symbols are the repository's — the vault has no TypeScript to find.
+    expect(result.symbolCount).toBeGreaterThan(0);
+
+    // Provenance is the code's HEAD, not the vault's (which has none).
+    const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    expect(result.repositoryCommit).toBe(head);
+
+    const header = JSON.parse(readFileSync(artifactPaths(vault).index, "utf8").split("\n")[0]!);
+    expect(header.repositoryCommit).toBe(head);
+  });
+
+  it("AC2: writes nothing inside the linked repository — every artifact lands in the vault", async () => {
+    const before = listing(repo);
+    const result = await runAnalysis({
+      root: vault,
+      repositoryRoot: repo,
+      queries,
+      rankingProvider: fakeProvider(),
+      pricing: PRICING
+    });
+
+    // The repository is byte-for-byte untouched at the tree level…
+    expect(listing(repo)).toEqual(before);
+
+    // …and the full artifact set checkpointed under the vault's `.spectrace/`.
+    const paths = artifactPaths(vault);
+    expect(existsSync(paths.index)).toBe(true);
+    expect(existsSync(paths.retrieval)).toBe(true);
+    expect(existsSync(paths.proposals)).toBe(true);
+    const vaultPosix = vault.replace(/\\/g, "/");
+    for (const written of result.artifactsWritten) expect(written.startsWith(vaultPosix)).toBe(true);
+  });
+
+  it("AC3: a run with no linked repository is byte-identical to a single-root run", async () => {
+    // `repo` is the original single-root fixture: vault and code in one place.
+    const read = () =>
+      (Object.values(artifactPaths(repo)) as string[]).map((artifact) => readFileSync(artifact, "utf8"));
+
+    await runAnalysis({ root: repo, queries, rankingProvider: fakeProvider() });
+    const withoutLink = read();
+
+    // Linking the vault to itself must be the same run, byte for byte.
+    await runAnalysis({ root: repo, repositoryRoot: repo, queries, rankingProvider: fakeProvider() });
+    expect(read()).toEqual(withoutLink);
   });
 });
 
