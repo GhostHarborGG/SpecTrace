@@ -19,7 +19,7 @@ retrieval:
 
 model:
   # Ranking model (REQ-CORE-030); null until ranking lands.
-  ranking: null
+  ranking: gpt-5.6-luna
   # Embedding model (REQ-CORE-021); unused in Configuration A.
   embedding: null
 

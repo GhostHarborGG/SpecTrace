@@ -26,3 +26,8 @@ cache.
 
 Analysis must be reproducible and rate-limit-safe (AD-3); the API is a
 transport, not a data store.
+
+## Notes
+
+Descoped to R1.1 with REQ-APP-010 (2026-08-11, BP; recorded in the build
+plan's Phase D gate note). See REQ-APP-010's note for the reasoning.
