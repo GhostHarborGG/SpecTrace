@@ -1120,3 +1120,168 @@ describe("spectrace validate (REQ-CLI-002)", () => {
     expect(run(["validate", "--repo", repo, "--json"]).status).toBe(0);
   });
 });
+
+describe("evaluate proposals (REQ-CLI-009 AC4)", () => {
+  let tmp: string;
+  let requirementsDir: string;
+  let proposalsFile: string;
+  let groundTruthFile: string;
+
+  const requirementMd = (id: string, title: string, difficulty: string) =>
+    `---\nid: ${id}\ntitle: ${title}\ndifficulty: ${difficulty}\nacceptance_criteria:\n  - It does the thing.\n---\n\n## Statement\n\nThe library shall ${title.toLowerCase()}.\n`;
+
+  const proposal = (requirementId: string, symbolId: string, confidence: number, classification = "implements") => ({
+    requirementId,
+    symbolId,
+    rank: 1,
+    classification,
+    confidence,
+    rationale: "fixture"
+  });
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), "spectrace-evalprop-"));
+    requirementsDir = path.join(tmp, "requirements");
+    proposalsFile = path.join(tmp, "proposals.json");
+    groundTruthFile = path.join(tmp, "ground-truth.json");
+    mkdirSync(requirementsDir);
+
+    writeFileSync(path.join(requirementsDir, "R-1.md"), requirementMd("R-1", "Create todo items", "high-overlap"), "utf8");
+    writeFileSync(path.join(requirementsDir, "R-2.md"), requirementMd("R-2", "Delete todo items", "partial-overlap"), "utf8");
+
+    // R-1: correct at suggest confidence. R-2: one correct but review-band,
+    // one wrong at suggest — so precision, recall, and the band rows all have
+    // something to disagree about.
+    writeFileSync(
+      proposalsFile,
+      JSON.stringify(
+        {
+          artifact: "spectrace.proposals",
+          version: 1,
+          repositoryCommit: "deadbeef",
+          configurationId: "bm25f-v5",
+          engineVersion: "0.0.0-test",
+          promptVersion: "rank-v1",
+          modelId: "fixture-model",
+          bands: { suggest: 0.8, review: 0.5 },
+          proposals: [
+            proposal("R-1", "src/create.ts::createTodo", 0.9),
+            proposal("R-2", "src/delete.ts::deleteTodo", 0.6),
+            proposal("R-2", "src/render.ts::renderList", 0.9)
+          ],
+          failures: [],
+          rawResponses: {},
+          usage: { run: { calls: 2, inputTokens: 10, outputTokens: 5 } }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const link = (requirementId: string, symbolId: string) => ({
+      requirementId,
+      symbolId,
+      labelPass: "independent",
+      relationship: "implements",
+      confidence: "confirmed",
+      rationale: "test fixture"
+    });
+    writeFileSync(
+      groundTruthFile,
+      JSON.stringify(
+        {
+          repositoryCommit: "deadbeef",
+          createdAt: "2026-08-02T00:00:00Z",
+          labeler: "fixture",
+          links: [link("R-1", "src/create.ts::createTodo"), link("R-2", "src/delete.ts::deleteTodo")]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  });
+
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const evaluateArgs = () => [
+    "evaluate", "proposals",
+    "--proposals", proposalsFile,
+    "--requirements", requirementsDir,
+    "--ground-truth", groundTruthFile
+  ];
+
+  it("AC4: reports aggregate precision, recall, and F1 with band and stratum rows", () => {
+    const { stdout, status } = run([...evaluateArgs(), "--json"]);
+    expect(status).toBe(0);
+    const artifact = JSON.parse(stdout);
+    expect(artifact.artifact).toBe("spectrace.proposal-metrics");
+    expect(artifact.bands).toEqual({ suggest: 0.8, review: 0.5 });
+    expect(artifact.provenance).toMatchObject({ configurationId: "bm25f-v5", modelId: "fixture-model" });
+
+    const rows = Object.fromEntries(artifact.report.breakdowns.map((b: { label: string }) => [b.label, b]));
+    // Overall: 3 predicted, 2 relevant, 2 hits.
+    expect(rows["overall"]).toMatchObject({ predicted: 3, relevant: 2, truePositives: 2 });
+    expect(rows["overall"].precision).toBeCloseTo(2 / 3);
+    expect(rows["overall"].recall).toBeCloseTo(1);
+    // Suggest-only drops the review-band hit: precision and recall both fall.
+    expect(rows["suggest-only"]).toMatchObject({ predicted: 2, truePositives: 1 });
+    expect(rows["suggest-only"].recall).toBeCloseTo(0.5);
+    // Difficulty strata from the requirements directory.
+    expect(rows["high-overlap"]).toMatchObject({ predicted: 1, truePositives: 1, precision: 1 });
+    expect(rows["partial-overlap"]).toMatchObject({ predicted: 2, truePositives: 1 });
+  });
+
+  it("AC4: emits no per-requirement or per-link rows in any output form", () => {
+    const json = run([...evaluateArgs(), "--json"]).stdout;
+    const human = run(evaluateArgs()).stdout;
+    // Provenance echoes run metadata; the report itself must name nothing.
+    const report = JSON.stringify(JSON.parse(json).report);
+    for (const identifier of ["R-1", "R-2", "createTodo", "deleteTodo", "renderList"]) {
+      expect(report).not.toContain(identifier);
+      expect(human).not.toContain(identifier);
+    }
+  });
+
+  it("AC2: computes without network access", () => {
+    // No key in the environment and no socket to open: success is the assertion.
+    const { status } = run([...evaluateArgs(), "--json"], envWithoutApiKey());
+    expect(status).toBe(0);
+  });
+
+  it("AC3: a missing proposals file exits 1", () => {
+    const { status, stderr } = run([
+      "evaluate", "proposals",
+      "--proposals", path.join(tmp, "nope.json"),
+      "--requirements", requirementsDir,
+      "--ground-truth", groundTruthFile,
+      "--json"
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stderr).error).toBe("unreadable_proposals");
+  });
+
+  it("AC3: a results artifact passed as proposals is rejected as malformed", () => {
+    const wrong = path.join(tmp, "wrong.json");
+    writeFileSync(wrong, JSON.stringify({ artifact: "spectrace.retrieval-results", proposals: 3 }), "utf8");
+    const { status, stderr } = run([
+      "evaluate", "proposals",
+      "--proposals", wrong,
+      "--requirements", requirementsDir,
+      "--ground-truth", groundTruthFile,
+      "--json"
+    ]);
+    expect(status).toBe(1);
+    expect(JSON.parse(stderr).error).toBe("malformed_proposals");
+  });
+
+  it("writes the metrics artifact with --out", () => {
+    const out = path.join(tmp, "metrics", "proposal-metrics.json");
+    const { status } = run([...evaluateArgs(), "--out", out, "--json"]);
+    expect(status).toBe(0);
+    const artifact = JSON.parse(readFileSync(out, "utf8"));
+    expect(artifact.artifact).toBe("spectrace.proposal-metrics");
+    expect(artifact.report.breakdowns.length).toBeGreaterThan(0);
+  });
+});

@@ -29,6 +29,7 @@ import {
   projectRankingCost,
   rankWithBands,
   retrieveForMode,
+  serializeProposalsArtifact,
   serializeRetrievalResults,
   serializeSymbolIndex,
   toPosixPath,
@@ -59,13 +60,11 @@ export interface RunAnalysisOptions {
   /**
    * The requirements to retrieve for, already reduced to query text.
    *
-   * Taken as input rather than derived here, because *how* a requirement
-   * becomes query text is the one seam where Studio and the CLI still differ:
-   * the CLI's `analyze` loads the evaluation-corpus format, whose `##
-   * Statement` section feeds `buildRequirementQueryText`, while core's vault
-   * schema (REQ-CORE-001) does not carry a statement at all. Until that is
-   * reconciled, the difference belongs in one visible place instead of being
-   * buried inside the run. See the REQ-APP-012 note.
+   * Taken as input rather than derived here so that *how* a requirement
+   * becomes query text stays in one visible place (`vaultQueries` in
+   * `./index.ts`). Since REQ-CORE-001 gained `statement` (2026-08-10), both
+   * clients feed `buildRequirementQueryText` the same three fields; this
+   * seam is where that parity is maintained, not where it is at risk.
    */
   queries: readonly { requirementId: string; text: string }[];
   /**
@@ -235,27 +234,23 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<RunResul
 
   // Written whether or not the run was cancelled: proposals produced before
   // the stop are real work, and AC3's promise is that completed work survives.
+  // Core's serializer — the same bytes `spectrace analyze --proposals` writes,
+  // by construction rather than by parity test (REQ-APP-012 AC1).
   writeArtifact(
     paths.proposals,
-    `${JSON.stringify(
-      {
-        artifact: "spectrace.proposals",
-        version: 1,
-        repositoryCommit,
-        configurationId: retrieval.configurationId,
-        engineVersion: CORE_VERSION,
-        promptVersion: ranked.promptVersion,
-        modelId: ranked.modelId,
-        bands: config.bands,
-        proposals: ranked.proposals,
-        failures: ranked.failures,
-        rawResponses: ranked.rawResponses,
-        usage: ranked.usage,
-        ...(ranked.cancelled ? { partial: true } : {})
-      },
-      null,
-      2
-    )}\n`
+    serializeProposalsArtifact({
+      repositoryCommit,
+      configurationId: retrieval.configurationId,
+      engineVersion: CORE_VERSION,
+      promptVersion: ranked.promptVersion,
+      modelId: ranked.modelId,
+      bands: config.bands,
+      proposals: ranked.proposals,
+      failures: ranked.failures,
+      rawResponses: ranked.rawResponses,
+      usage: ranked.usage,
+      ...(ranked.cancelled ? { partial: true } : {})
+    })
   );
   written.push(toPosixPath(paths.proposals));
 

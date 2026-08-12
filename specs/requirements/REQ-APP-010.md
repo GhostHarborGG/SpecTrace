@@ -25,3 +25,12 @@ permissions.
 
 The repo connection is the product's differentiator; read-only scope keeps the
 security story trivial.
+
+## Notes
+
+Descoped to R1.1 (2026-08-11, BP; recorded in the build plan's Phase D
+gate note). REQ-APP-015 covers the capstone's need — a vault analyzing a
+local codebase — and fixed the decisions this requirement inherits:
+artifacts live with the vault and the code source is read-only by
+construction, so the GitHub cache arrives as another read-only
+`repositoryRoot`.

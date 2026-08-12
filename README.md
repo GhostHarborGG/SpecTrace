@@ -7,7 +7,7 @@ them, keeps every link under human review, and detects when the two drift apart
 as the repository evolves.
 
 [![CI](https://github.com/GhostHarborGG/SpecTrace/actions/workflows/ci.yml/badge.svg)](https://github.com/GhostHarborGG/SpecTrace/actions/workflows/ci.yml)
-[![Phase](https://img.shields.io/badge/phase-D%20·%20ranking%20%26%20review-1f6feb)](specs/spectrace-build-plan-with-claude.md)
+[![Phase](https://img.shields.io/badge/phase-E%20·%20navigation%20%26%20review%20queue-1f6feb)](specs/spectrace-build-plan-with-claude.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![pnpm](https://img.shields.io/badge/pnpm-10.14-f69220?logo=pnpm&logoColor=white)](https://pnpm.io)
@@ -63,15 +63,15 @@ Design commitments that shape everything else:
 ## Project status
 
 The build plan is **gated by exit criteria, not calendar dates** — a phase ends
-when its gate is green. Three gates are closed.
+when its gate is green. Four gates are closed.
 
 | Phase | Focus | Gate |
 |---|---|---|
 | **A** | Foundations & feasibility | ✅ **Closed 2026-08-02** — GO on retrieval quality |
 | **B** | Schema freeze, dataset & Studio skeleton | ✅ **Closed 2026-08-02** — all three criteria met |
 | **C** | Indexing & retrieval, evaluated | ✅ **Closed 2026-08-04** — configuration A ships as the default |
-| **D** | Ranking & review (+ Studio sync/analysis) | 🔨 **In progress** — full `analyze → review` loop on both surfaces |
-| **E** | Navigation & the review queue | 🔨 Started early — queue and panes exist, several criteria open |
+| **D** | Ranking & review (+ Studio sync/analysis) | ✅ **Closed 2026-08-11** — configuration C precision/recall reported; parity verified |
+| **E** | Navigation & the review queue | 🔨 **In progress** — surfaces exist; the flagship triage flow is the gate |
 | **F** | Drift detection, both surfaces | ⏳ Planned |
 | **G** | Evaluation, case study & full dogfood | ⏳ Planned |
 | **H** | Write-up, polish & public release (`v1.0.0`) | ⏳ Planned |
@@ -96,26 +96,40 @@ semantic mode embeds the whole repository and the default must transmit
 nothing. Reaching that mode takes two deliberate acts: selecting it, and
 accepting corpus transmission per run.
 
-**Phase D** is in progress. The `analyze → review` loop works end to end on
-both surfaces, ranking runs against an injected provider with per-requirement
-cost accounting, and Studio runs the same pipeline as the CLI by calling the
-same functions rather than reimplementing them. Remaining: the GitHub
-connection and repository cache (REQ-APP-010/011), and the byte-for-byte
-proposal parity measurement.
+**Phase D** closed with the full `analyze → review` loop working on both
+surfaces. On the frozen corpus, configuration C (hybrid retrieval + LLM
+ranking) reached **precision 0.538 / recall 0.875 / F1 0.667** against
+independent labels (0.731 / 0.905 / 0.809 counting second-pass labels) — 120
+proposals from 12 model calls, zero malformed responses, **$0.02 measured**
+for the whole run. In the human review pass, every rejection landed in the
+review band and none in suggest: the confidence bands triaged correctly.
+Studio ran the same analysis through a linked local repository (REQ-APP-015):
+its symbol index is byte-identical to the CLI's, retrieval matches
+candidate-for-candidate and rank-for-rank, and the artifact envelopes are
+frozen as cross-package snapshot contracts. The GitHub connection
+(REQ-APP-010/011) was descoped to R1.1, post-capstone — a local directory
+covers every remaining phase.
+
+**Phase E** is in progress — the review queue, trace panes, and coverage
+dashboard were built ahead of their phase, and its gate is the product's
+best moment: triaging a real proposal batch in Studio measurably faster than
+in the terminal. Queued alongside from the Phase D close-out: hybrid
+retrieval in Studio (an embedding provider plus a properly designed
+corpus-transmission consent step) and pricing input in the run panel.
 
 ### Requirement progress
 
-55 requirements across three specification documents, tracked one file per
+56 requirements across three specification documents, tracked one file per
 requirement in [`specs/requirements/`](specs/requirements/):
 
 | Family | Scope | Implemented | Partial | Proposed | Total |
 |---|---|--:|--:|--:|--:|
 | `REQ-CORE` | Engine: schema, index, retrieval, ranking, links, drift | 22 | 0 | 4 | 26 |
 | `REQ-CLI` | Command surface | 8 | 0 | 1 | 9 |
-| `REQ-APP` | Studio (desktop app) | 0 | 8 | 12 | 20 |
-| | **Total** | **30** | **8** | **17** | **55** |
+| `REQ-APP` | Studio (desktop app) | 1 | 8 | 12 | 21 |
+| | **Total** | **31** | **8** | **17** | **56** |
 
-Backed by **545 tests** across the monorepo, each mapped to a specific
+Backed by **586 tests** across the monorepo, each mapped to a specific
 acceptance criterion, run on Linux, Windows, and macOS in CI.
 
 `partial` is used literally: a requirement sits there when some acceptance
@@ -344,9 +358,14 @@ review queue all live in `@spectrace/core` and are invoked by both clients.
 Parity is a property of there being one implementation, not of two being
 tested against each other.
 
-Two things Studio deliberately does **not** do yet: connect to GitHub, and
-resolve a repository from a commit SHA (`REQ-APP-010/011`). It analyses the
-working tree on disk.
+Studio links a **local repository directory** to the open vault
+(`REQ-APP-015`): the vault supplies the requirements, the linked directory
+supplies the code, both paths stay visible, and everything SpecTrace writes
+lands in the vault's `.spectrace/` — the linked repository is read-only by
+construction. The pairing is remembered per machine and restored when the
+vault reopens. GitHub connection and SHA-resolved caches (`REQ-APP-010/011`)
+are descoped to R1.1, after the capstone; when they arrive, the synced cache
+is just another read-only repository root.
 
 ```bash
 pnpm --filter @spectrace/studio dev

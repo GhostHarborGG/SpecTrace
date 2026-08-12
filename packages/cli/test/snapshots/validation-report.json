@@ -1,0 +1,26 @@
+{
+  "artifact": "spectrace.validation-report",
+  "version": 1,
+  "valid": false,
+  "specPaths": [
+    "specs/requirements"
+  ],
+  "requirementCount": 2,
+  "documentCount": 3,
+  "violations": [
+    {
+      "rule": "duplicate-id",
+      "path": "specs/requirements/REQ-V-002.md",
+      "message": "Duplicate requirement ID REQ-V-001.",
+      "requirementId": "REQ-V-001"
+    }
+  ],
+  "warnings": [
+    {
+      "source": "config",
+      "rule": "missing-spec-path",
+      "key": "specPaths",
+      "message": "Configured specification path `docs/absent` does not exist — nothing validated from it."
+    }
+  ]
+}

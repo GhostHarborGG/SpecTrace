@@ -212,6 +212,11 @@ export {
   RECORDED_PROMPT_DIGEST
 } from "./ranking/prompt.js";
 export { estimateCostUsd, summarizeUsage } from "./ranking/usage.js";
+export {
+  serializeProposalsArtifact,
+  PROPOSALS_ARTIFACT,
+  type ProposalsArtifactParams
+} from "./ranking/proposals-artifact.js";
 
 // ---------- The shared analysis pipeline (REQ-CLI-004, REQ-APP-012) ----------
 
@@ -326,6 +331,17 @@ export {
   type CoverageReportTotals,
   type BuildCoverageReportOptions
 } from "./reporting/coverage-report.js";
+export {
+  buildInitReport,
+  buildValidationReport,
+  INIT_REPORT_ARTIFACT,
+  INIT_REPORT_VERSION,
+  VALIDATION_REPORT_ARTIFACT,
+  VALIDATION_REPORT_VERSION,
+  type InitReportEnvelope,
+  type ReportedWarning,
+  type ValidationReportEnvelope
+} from "./reporting/report-envelopes.js";
 
 // ---------- Evaluation (REQ-CORE-070/071) ----------
 
@@ -345,6 +361,15 @@ export {
   type RetrievalMetricsBreakdown,
   type RetrievalMetricsReport
 } from "./evaluation/retrieval-metrics.js";
+export {
+  evaluateProposals,
+  serializeProposalMetricsReport,
+  PROPOSAL_METRICS_ARTIFACT,
+  type EvaluatedProposal,
+  type ProposalMetricsBreakdown,
+  type ProposalMetricsReport,
+  type ProposalRunProvenance
+} from "./evaluation/proposal-metrics.js";
 export {
   compareMetricsReports,
   serializeMetricsComparison,

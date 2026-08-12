@@ -1,0 +1,12 @@
+{
+  "artifact": "spectrace.init-report",
+  "version": 1,
+  "repositoryRoot": "h:/contract/repo",
+  "created": [
+    ".spectrace/config.yaml"
+  ],
+  "skipped": [
+    ".spectrace/templates/use-case.md"
+  ],
+  "overwritten": []
+}

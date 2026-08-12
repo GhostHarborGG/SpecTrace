@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { serializeProposalsArtifact, serializeSymbolIndex } from "@spectrace/core";
 import { coverageReport, linkQueries, readVaultLinkState } from "../src/main/coverage.js";
 
 /**
@@ -160,5 +161,102 @@ describe("Studio ↔ CLI parity (NFR-APP-007, REQ-APP-012 AC1)", () => {
     const report = coverageReport({ root: repo });
     expect(() => structuredClone(report)).not.toThrow();
     expect(structuredClone(report)).toEqual(report);
+  });
+});
+
+/**
+ * The proposal/index halves of NFR-APP-007 (REQ-APP-012 AC1).
+ *
+ * Studio writes both artifacts through core's serializers
+ * (`serializeProposalsArtifact`, `serializeSymbolIndex` — see
+ * `src/main/run-analysis.ts`), the same calls `spectrace analyze` and
+ * `spectrace index` make. These cases rebuild the recorded contract fixtures
+ * from this side of the package boundary and require byte equality with the
+ * CLI's snapshot files: an envelope change now fails both suites at once,
+ * and a Studio-only or CLI-only divergence has nowhere to hide.
+ */
+describe("proposal and index artifact contracts (REQ-APP-012 AC1)", () => {
+  const contractsDir = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..", "..", "..",
+    "packages", "cli", "test", "snapshots"
+  );
+  const COMMIT_PIN = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+
+  it("the proposals envelope Studio writes matches the CLI-recorded contract byte for byte", () => {
+    const produced = serializeProposalsArtifact({
+      repositoryCommit: COMMIT_PIN,
+      configurationId: "bm25f-v5",
+      engineVersion: "0.0.0-contract",
+      promptVersion: "rank-v1-contract",
+      modelId: "contract-model",
+      bands: { suggest: 0.8, review: 0.5 },
+      proposals: [
+        {
+          requirementId: "REQ-V-001",
+          symbolId: "ts:src/mod.ts#alpha:function",
+          rank: 1,
+          classification: "implements",
+          confidence: 0.91,
+          rationale: "Contract fixture."
+        }
+      ],
+      failures: [
+        {
+          rule: "empty-rationale",
+          scope: "entry",
+          requirementId: "REQ-V-001",
+          symbolId: "ts:src/mod.ts#beta:function",
+          message: "Rationale absent or blank.",
+          rawResponseRef: "deadbeefdeadbeef",
+          promptVersion: "rank-v1-contract",
+          modelId: "contract-model"
+        }
+      ],
+      rawResponses: [{ ref: "deadbeefdeadbeef", requirementId: "REQ-V-001", body: '{"verdicts":[]}' }],
+      usage: {
+        records: [
+          {
+            kind: "ranking",
+            modelId: "contract-model",
+            requirementId: "REQ-V-001",
+            inputTokens: 100,
+            outputTokens: 20,
+            estimatedCostUsd: 0
+          }
+        ],
+        run: { calls: 1, inputTokens: 100, outputTokens: 20, estimatedCostUsd: 0 },
+        byRequirement: [
+          {
+            requirementId: "REQ-V-001",
+            totals: { calls: 1, inputTokens: 100, outputTokens: 20, estimatedCostUsd: 0 }
+          }
+        ]
+      }
+    });
+    expect(produced).toBe(readFileSync(path.join(contractsDir, "proposals-artifact.json"), "utf8"));
+  });
+
+  it("the symbol-index envelope Studio writes matches the CLI-recorded contract byte for byte", () => {
+    const produced = serializeSymbolIndex(
+      [
+        {
+          symbolId: "ts:src/mod.ts#alpha:function",
+          kind: "function",
+          name: "alpha",
+          qualifiedName: "alpha",
+          relativePath: "src/mod.ts",
+          startLine: 1,
+          endLine: 5,
+          signature: "function alpha(): void",
+          documentation: "Contract fixture symbol.",
+          normalizedSource: "contract fixture symbol.",
+          exported: true,
+          repositoryCommit: COMMIT_PIN
+        }
+      ],
+      { repositoryCommit: COMMIT_PIN, engineVersion: "0.0.0-contract", excludePatterns: [] }
+    );
+    expect(produced).toBe(readFileSync(path.join(contractsDir, "symbol-index.jsonl"), "utf8"));
   });
 });

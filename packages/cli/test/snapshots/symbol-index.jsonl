@@ -1,0 +1,2 @@
+{"artifact":"spectrace.symbol-index","version":1,"repositoryCommit":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0","engineVersion":"0.0.0-contract","excludePatterns":[],"symbolCount":1}
+{"symbolId":"ts:src/mod.ts#alpha:function","kind":"function","name":"alpha","qualifiedName":"alpha","relativePath":"src/mod.ts","startLine":1,"endLine":5,"signature":"function alpha(): void","documentation":"Contract fixture symbol.","normalizedSource":"contract fixture symbol.","exported":true,"repositoryCommit":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"}
