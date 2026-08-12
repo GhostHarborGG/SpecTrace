@@ -9,6 +9,7 @@ acceptance_criteria:
   - "`spectrace evaluate retrieval --results <file> --ground-truth <file> [--k <list>]` prints or emits the metrics report with its breakdowns."
   - "`evaluate retrieval` requires no network access, and neither does metric computation anywhere in the command family: `compare` and a `sweep` restricted to lexical mode open no socket."
   - A missing or malformed input file exits 1.
+  - "`spectrace evaluate proposals --proposals <file> --requirements <dir> --ground-truth <file> [--json]` reports precision, recall, and F1 for ranked proposals — overall, per difficulty stratum, per band cutoff, and per label pass — as aggregates only: no per-requirement or per-link row appears in any output form."
 ---
 
 # spectrace evaluate
@@ -19,6 +20,15 @@ Compute evaluation metrics (REQ-CORE-070/071):
 `spectrace evaluate retrieval --results <file> --ground-truth <file>
 [--k <list>]` prints/emits the metrics report with its breakdowns; requires no
 network access; exit 1 on missing or malformed input files.
+
+A fourth subcommand serves the ranked half of the pipeline:
+`evaluate proposals --proposals <file> --requirements <dir>
+--ground-truth <file> [--json]` scores a proposals artifact against the
+same ground truth, treating an `implements`-classified proposal as a
+predicted link and an `implements`-relationship label as a relevant one
+(REQ-CORE-070 AC2's rule, applied to the ranking stage). Band thresholds
+come from the artifact itself, so the score describes the run that was
+made, not the configuration that exists now. Pure computation; no network.
 
 Two further subcommands serve cross-configuration evaluation:
 `evaluate compare --metrics <file>…` aligns already-computed metrics
@@ -37,6 +47,30 @@ this command as well.
 
 Passing a ground-truth path to this command is explicitly permitted under
 CLAUDE.md rule 1; reading back anything beyond aggregate metrics is not.
+
+## AC4 amendment — proposed 2026-08-11 (Phase D gate)
+
+The Phase D milestone is "precision and recall reported for configuration
+C", and until this amendment nothing in the command family computed
+precision or recall at all — `retrieval`, `compare`, and `sweep` all score
+the retrieval stage (Recall@k/Hit@k/MRR), which was Phase C's question.
+`evaluate proposals` closes that gap.
+
+Definitions: the predicted set is the artifact's proposals with
+classification `implements`, keyed by (requirement, symbol) pair; the
+relevant set is the ground truth's `implements`-relationship links over the
+same requirement scope. Precision = TP/predicted, recall = TP/relevant, F1
+their harmonic mean; zero denominators report 0 with the counts alongside,
+never NaN. Breakdown rows mirror `evaluate retrieval`'s: overall (suggest +
+review bands, independent labels), one row per difficulty stratum, a
+suggest-only row (the band-cutoff comparison REQ-CORE-041's threshold
+review needs), and independent-plus-candidate-review.
+
+The aggregate-only clause is the blinding wall (CLAUDE.md rule 1) built
+into the output contract rather than left to reader discipline: the command
+never emits which requirement or which link scored, in text or JSON, so
+reading back its output cannot leak label contents. Counts of scoped and
+skipped items are aggregates and do appear.
 
 ## AC2 amendment — accepted by BP 2026-08-04
 

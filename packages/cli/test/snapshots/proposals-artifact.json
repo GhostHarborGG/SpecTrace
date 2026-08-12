@@ -1,0 +1,71 @@
+{
+  "artifact": "spectrace.proposals",
+  "version": 1,
+  "repositoryCommit": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+  "configurationId": "bm25f-v5",
+  "engineVersion": "0.0.0-contract",
+  "promptVersion": "rank-v1-contract",
+  "modelId": "contract-model",
+  "bands": {
+    "suggest": 0.8,
+    "review": 0.5
+  },
+  "proposals": [
+    {
+      "requirementId": "REQ-V-001",
+      "symbolId": "ts:src/mod.ts#alpha:function",
+      "rank": 1,
+      "classification": "implements",
+      "confidence": 0.91,
+      "rationale": "Contract fixture."
+    }
+  ],
+  "failures": [
+    {
+      "rule": "empty-rationale",
+      "scope": "entry",
+      "requirementId": "REQ-V-001",
+      "symbolId": "ts:src/mod.ts#beta:function",
+      "message": "Rationale absent or blank.",
+      "rawResponseRef": "deadbeefdeadbeef",
+      "promptVersion": "rank-v1-contract",
+      "modelId": "contract-model"
+    }
+  ],
+  "rawResponses": [
+    {
+      "ref": "deadbeefdeadbeef",
+      "requirementId": "REQ-V-001",
+      "body": "{\"verdicts\":[]}"
+    }
+  ],
+  "usage": {
+    "records": [
+      {
+        "kind": "ranking",
+        "modelId": "contract-model",
+        "requirementId": "REQ-V-001",
+        "inputTokens": 100,
+        "outputTokens": 20,
+        "estimatedCostUsd": 0
+      }
+    ],
+    "run": {
+      "calls": 1,
+      "inputTokens": 100,
+      "outputTokens": 20,
+      "estimatedCostUsd": 0
+    },
+    "byRequirement": [
+      {
+        "requirementId": "REQ-V-001",
+        "totals": {
+          "calls": 1,
+          "inputTokens": 100,
+          "outputTokens": 20,
+          "estimatedCostUsd": 0
+        }
+      }
+    ]
+  }
+}

@@ -46,7 +46,12 @@ import {
   unlinkedRequirements,
   buildTransmissionUnits,
   estimateCostUsd,
+  buildInitReport,
+  buildValidationReport,
+  evaluateProposals,
   evaluateRetrieval,
+  serializeProposalMetricsReport,
+  serializeProposalsArtifact,
   rankWithBands,
   projectRankingCost,
   OUTPUT_TOKENS_PER_CANDIDATE,
@@ -68,7 +73,11 @@ import {
   type CandidateSet,
   type CodeSymbol,
   type ConfigurationRun,
+  type EvaluatedProposal,
   type GroundTruthFile,
+  type ReportedWarning,
+  type ProposalMetricsReport,
+  type ProposalRunProvenance,
   type RetrievalMode,
   type MergeConfig,
   type MergeStrategyId,
@@ -145,10 +154,6 @@ function readSymbols(filePath: string): CodeSymbol[] {
   return parseSymbolIndex(readFileSync(filePath, "utf8")).symbols;
 }
 
-/** Envelope for `init --json`; versioned per SPEC-CLI-000 §3 AC1. */
-const INIT_REPORT_ARTIFACT = "spectrace.init-report";
-const INIT_REPORT_VERSION = 1;
-
 program
   .command("init")
   .description("Scaffold .spectrace/ config and templates (REQ-CLI-001)")
@@ -190,14 +195,8 @@ program
     }
 
     if (cmd.optsWithGlobals().json) {
-      printJson(process.stdout, {
-        artifact: INIT_REPORT_ARTIFACT,
-        version: INIT_REPORT_VERSION,
-        repositoryRoot: toPosixPath(repo),
-        created,
-        skipped,
-        overwritten
-      });
+      // Core's envelope (SPEC-CLI-000 §3 AC1) — the CLI only prints it.
+      printJson(process.stdout, buildInitReport({ repositoryRoot: toPosixPath(repo), created, skipped, overwritten }));
     } else {
       for (const path of created) process.stdout.write(`created     ${path}\n`);
       for (const path of overwritten) process.stdout.write(`overwritten ${path}\n`);
@@ -209,18 +208,6 @@ program
       );
     }
   });
-
-/** Envelope for `validate --json`; versioned per SPEC-CLI-000 §3 AC1. */
-const VALIDATION_REPORT_ARTIFACT = "spectrace.validation-report";
-const VALIDATION_REPORT_VERSION = 1;
-
-interface ReportedWarning {
-  source: "config" | "schema";
-  rule: string;
-  message: string;
-  key?: string;
-  path?: string;
-}
 
 program
   .command("validate")
@@ -272,16 +259,18 @@ program
     );
 
     if (cmd.optsWithGlobals().json) {
-      printJson(process.stdout, {
-        artifact: VALIDATION_REPORT_ARTIFACT,
-        version: VALIDATION_REPORT_VERSION,
-        valid: report.valid,
-        specPaths: config.specPaths,
-        requirementCount: report.requirements.length,
-        documentCount: documents.length,
-        violations: report.violations,
-        warnings
-      });
+      // Core's envelope (SPEC-CLI-000 §3 AC1) — the CLI only prints it.
+      printJson(
+        process.stdout,
+        buildValidationReport({
+          valid: report.valid,
+          specPaths: config.specPaths,
+          requirementCount: report.requirements.length,
+          documentCount: documents.length,
+          violations: report.violations,
+          warnings
+        })
+      );
     } else {
       for (const warning of warnings) process.stdout.write(`warning: ${warning.message}\n`);
       for (const violation of report.violations) {
@@ -817,28 +806,22 @@ program
       if (opts.proposals) {
         ranking.path = resolve(opts.proposals);
         mkdirSync(dirname(ranking.path), { recursive: true });
+        // Core's serializer — the same bytes Studio checkpoints, by
+        // construction rather than by parity test (REQ-APP-012 AC1).
         writeFileSync(
           ranking.path,
-          `${JSON.stringify(
-            {
-              artifact: "spectrace.proposals",
-              version: 1,
-              repositoryCommit,
-              configurationId: provenance.configurationId,
-              engineVersion: CORE_VERSION,
-              promptVersion: result.promptVersion,
-              modelId: result.modelId,
-              bands: config.bands,
-              proposals: bucketed,
-              failures: result.failures,
-              // The raw bodies behind every failure's rawResponseRef, so a
-              // reader can see what the model actually said (REQ-CORE-031).
-              rawResponses: result.rawResponses,
-              usage: result.usage
-            },
-            null,
-            2
-          )}\n`,
+          serializeProposalsArtifact({
+            repositoryCommit,
+            configurationId: provenance.configurationId,
+            engineVersion: CORE_VERSION,
+            promptVersion: result.promptVersion,
+            modelId: result.modelId,
+            bands: config.bands,
+            proposals: bucketed,
+            failures: result.failures,
+            rawResponses: result.rawResponses,
+            usage: result.usage
+          }),
           "utf8"
         );
       }
@@ -1556,6 +1539,147 @@ evaluate
       }
     }
   );
+
+evaluate
+  .command("proposals")
+  .description("Precision, recall, and F1 for a ranked proposals artifact (REQ-CLI-009 AC4)")
+  .requiredOption("--proposals <file>", "proposals artifact from `spectrace analyze --proposals`")
+  .requiredOption("--requirements <dir>", "requirement .md directory; scopes the evaluation and enables difficulty breakdowns")
+  .requiredOption("--ground-truth <file>", "hand-labeled ground-truth.json")
+  .option("--out <file>", "also write the report as a metrics artifact")
+  .option("--json", "machine-readable output on stdout")
+  .action(
+    (
+      opts: { proposals: string; requirements: string; groundTruth: string; out?: string; json?: boolean },
+      cmd: Command
+    ) => {
+      // The artifact supplies its own band thresholds, so the score describes
+      // the run that was made, not the configuration that exists now.
+      let artifact: {
+        repositoryCommit?: string;
+        configurationId?: string;
+        engineVersion?: string;
+        promptVersion?: string;
+        modelId?: string;
+        bands?: { suggest?: unknown; review?: unknown };
+        proposals?: unknown;
+      };
+      try {
+        artifact = JSON.parse(readFileSync(resolve(opts.proposals), "utf8")) as typeof artifact & {
+          artifact?: string;
+        };
+      } catch (error) {
+        fail({ error: "unreadable_proposals", message: error instanceof Error ? error.message : String(error) }, 1);
+        return;
+      }
+      const bands = artifact.bands;
+      if (
+        (artifact as { artifact?: string }).artifact !== "spectrace.proposals" ||
+        !Array.isArray(artifact.proposals) ||
+        typeof bands?.suggest !== "number" ||
+        typeof bands?.review !== "number"
+      ) {
+        fail(
+          {
+            error: "malformed_proposals",
+            message: "Expected a spectrace.proposals artifact with a `proposals` array and numeric `bands`."
+          },
+          1
+        );
+        return;
+      }
+
+      let groundTruthRaw: unknown;
+      try {
+        groundTruthRaw = JSON.parse(readFileSync(resolve(opts.groundTruth), "utf8"));
+      } catch (error) {
+        fail({ error: "unreadable_ground_truth", message: error instanceof Error ? error.message : String(error) }, 1);
+        return;
+      }
+      if (
+        typeof groundTruthRaw !== "object" ||
+        groundTruthRaw === null ||
+        !Array.isArray((groundTruthRaw as { links?: unknown }).links)
+      ) {
+        fail(
+          { error: "malformed_ground_truth", message: "Ground-truth file must be a JSON object with a `links` array." },
+          1
+        );
+        return;
+      }
+
+      const { requirements, errors } = loadRequirements(resolve(opts.requirements));
+      if (errors.length > 0) {
+        fail({ error: "invalid_requirements", errors }, 1);
+        return;
+      }
+
+      const report = evaluateProposals({
+        proposals: artifact.proposals as EvaluatedProposal[],
+        groundTruth: groundTruthRaw as GroundTruthFile,
+        requirements: requirements.map((r) => ({ id: r.id, difficulty: r.difficulty })),
+        bands: { suggest: bands.suggest, review: bands.review }
+      });
+
+      const provenance: ProposalRunProvenance = {
+        repositoryCommit: artifact.repositoryCommit ?? null,
+        configurationId: artifact.configurationId ?? null,
+        engineVersion: artifact.engineVersion ?? null,
+        promptVersion: artifact.promptVersion ?? null,
+        modelId: artifact.modelId ?? null
+      };
+      const serialized = serializeProposalMetricsReport(report, provenance, {
+        suggest: bands.suggest,
+        review: bands.review
+      });
+
+      if (opts.out) {
+        const outPath = resolve(opts.out);
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, serialized, "utf8");
+      }
+
+      if (cmd.optsWithGlobals().json) {
+        process.stdout.write(serialized);
+      } else {
+        process.stdout.write(formatProposalMetricsHuman(report, provenance, { suggest: bands.suggest, review: bands.review }));
+      }
+    }
+  );
+
+/**
+ * Aggregate rows only — never a requirement or symbol ID. The blinding wall
+ * (REQ-CLI-009 AC4) is a property of the report shape, and this formatter
+ * keeps it one: everything printed here already survived aggregation.
+ */
+function formatProposalMetricsHuman(
+  report: ProposalMetricsReport,
+  provenance: ProposalRunProvenance,
+  bands: { suggest: number; review: number }
+): string {
+  const lines: string[] = [];
+  lines.push(
+    `config ${provenance.configurationId ?? "?"} · commit ${provenance.repositoryCommit ?? "?"} · ` +
+      `model ${provenance.modelId ?? "?"} · prompt ${provenance.promptVersion ?? "?"}`
+  );
+  lines.push(`bands: suggest ≥ ${bands.suggest}, review ≥ ${bands.review}`);
+  for (const b of report.breakdowns) {
+    lines.push("");
+    lines.push(`${b.label}  (n=${b.requirementCount}, bands=${b.bands.join("+")})`);
+    lines.push(
+      `  Precision ${b.precision.toFixed(3)}  Recall ${b.recall.toFixed(3)}  F1 ${b.f1.toFixed(3)}` +
+        `   (TP ${b.truePositives} / predicted ${b.predicted} / relevant ${b.relevant})`
+    );
+    if (b.requirementsWithoutGroundTruthCount > 0) {
+      lines.push(`  without ground truth: ${b.requirementsWithoutGroundTruthCount} requirement(s)`);
+    }
+  }
+  if (report.proposalsOutsideScope > 0) {
+    lines.push("");
+    lines.push(`${report.proposalsOutsideScope} proposal(s) outside the evaluated requirement set — not scored.`);
+  }
+  return lines.join("\n") + "\n";
+}
 
 /** Reads a metrics artifact written by `evaluate retrieval --out`. */
 function readMetricsArtifact(filePath: string): MetricsArtifact {

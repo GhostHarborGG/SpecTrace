@@ -57,12 +57,32 @@ BM25F input, hence different candidates, hence different proposals. It is
 isolated in `vaultQueries` in `apps/studio/src/main/index.ts` and named there
 rather than hidden inside the run.
 
-**This needs a BP decision**, since either fix touches a contract: add a
-statement to REQ-CORE-001's schema, or re-point the analysis pipeline at the
-loader `analyze` uses (`packages/cli/src/requirements.ts`, which additionally
-requires a `difficulty` field the spec vault does not carry). AC1 stays unmet
-until then, and the honest reading is that Studio and the CLI currently
-analyse two different requirement contracts.
+**Resolved 2026-08-10** (the paragraph above kept as the record): BP chose
+the schema amendment, REQ-CORE-001 gained an optional `statement`, and
+`vaultQueries` now feeds `buildRequirementQueryText` the same three fields
+`analyze` does. Same join, same fields — identical documents produce
+identical BM25F input.
+
+## AC1 — proposal/index contracts recorded (2026-08-11)
+
+The proposals envelope was the last hand-assembled artifact: `analyze` and
+Studio's run each built the `spectrace.proposals` JSON inline. It moved to
+core (`packages/core/src/ranking/proposals-artifact.ts`,
+`serializeProposalsArtifact`) and both clients now write core's bytes
+verbatim; the symbol index already went through core's
+`serializeSymbolIndex` on both sides. Both envelopes are frozen in
+`packages/cli/test/snapshots/` (`proposals-artifact.json`,
+`symbol-index.jsonl`), recorded by
+`packages/cli/test/artifact-contracts.test.ts` and read back by
+`apps/studio/test/parity.test.ts` — the coverage-report pattern, applied to
+the two artifacts AC1 names.
+
+What remains for AC1 is the criterion's own wording: a live run over the
+controlled evaluation repository, compared byte-for-byte against the CLI's.
+That comparison is part of the Phase D gate run (which needs a real model)
+and is BP's to perform; the machinery above is what makes its outcome a
+foregone conclusion rather than a hope. Status stays `partial` until it is
+done.
 
 ## Coverage parity — structural, and unchanged
 

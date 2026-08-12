@@ -32,10 +32,13 @@ runs/
 # Generated index (REQ-CORE-012: fully rebuildable from specs + repository, so
 # nothing may exist only here). Config and templates ARE committed — they are
 # shared per-repo settings, so CI validates against the same ones you do.
-.spectrace/index.json
-.spectrace/index.jsonl
-.spectrace/retrieval.json
+# `**/` because any directory can be a Studio vault since REQ-APP-015, and a
+# vault's run artifacts land in its own `.spectrace/` (e.g. the dogfood vault
+# at specs/requirements/), not only the repo root's.
+**/.spectrace/index.json
+**/.spectrace/index.jsonl
+**/.spectrace/retrieval.json
 
 # Embedding vector cache (REQ-CORE-021): a pure cost optimization, rebuildable
 # by re-embedding. Machine-local, and large.
-.spectrace/embeddings.json
+**/.spectrace/embeddings.json
