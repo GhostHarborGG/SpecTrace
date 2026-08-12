@@ -24,6 +24,7 @@ import {
   type VaultSummary
 } from "../shared/ipc.js";
 import { readVault, readVaultFile, writeVaultFile } from "./vault.js";
+import { linkRepository, linkedRepository, unlinkRepository } from "./workspace.js";
 import { analyzeVault } from "./analysis.js";
 import { coverageReport, linkQueries, readVaultLinkState } from "./coverage.js";
 import { applyDecisions, reviewQueue } from "./review.js";
@@ -75,6 +76,28 @@ function registerHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.openVault, (_event, directoryPath: string): VaultSummary => readVault(directoryPath));
 
+  // The vault→repository pairing (REQ-APP-015). Machine-local, so it lives in
+  // userData rather than in the vault — see ./workspace.ts.
+  const workspaceStore = join(app.getPath("userData"), "workspaces.json");
+
+  ipcMain.handle(IPC_CHANNELS.chooseRepository, async (_event, vaultRoot: string): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      title: "Link repository",
+      properties: ["openDirectory"]
+    });
+    const chosen = result.filePaths[0];
+    if (result.canceled || !chosen) return null;
+    return linkRepository(workspaceStore, vaultRoot, chosen);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.linkedRepository, (_event, vaultRoot: string): string | null =>
+    linkedRepository(workspaceStore, vaultRoot)
+  );
+
+  ipcMain.handle(IPC_CHANNELS.unlinkRepository, (_event, vaultRoot: string): void => {
+    unlinkRepository(workspaceStore, vaultRoot);
+  });
+
   ipcMain.handle(IPC_CHANNELS.readFile, (_event, root: string, relativePath: string): string =>
     readVaultFile(root, relativePath)
   );
@@ -93,8 +116,12 @@ function registerHandlers(): void {
   // `spectrace coverage --json` exactly (NFR-APP-007).
   ipcMain.handle(
     IPC_CHANNELS.coverage,
-    (_event, root: string, symbolIndexPath?: string) =>
-      coverageReport({ root, ...(symbolIndexPath ? { indexPath: symbolIndexPath } : {}) })
+    (_event, root: string, symbolIndexPath?: string, repositoryRoot?: string) =>
+      coverageReport({
+        root,
+        ...(symbolIndexPath ? { indexPath: symbolIndexPath } : {}),
+        ...(repositoryRoot ? { repositoryRoot } : {})
+      })
   );
 
   // One run at a time, tracked here so `cancelAnalysis` has something to
@@ -113,6 +140,7 @@ function registerHandlers(): void {
         const providers = buildProviders(request.root);
         return await runAnalysis({
           root: request.root,
+          ...(request.repositoryRoot === undefined ? {} : { repositoryRoot: request.repositoryRoot }),
           queries: vaultQueries(request.root),
           ...(request.mode === undefined ? {} : { mode: request.mode }),
           ...(request.pricing === undefined ? {} : { pricing: request.pricing }),
@@ -140,7 +168,10 @@ function registerHandlers(): void {
     return true;
   });
 
-  ipcMain.handle(IPC_CHANNELS.reviewQueue, (_event, root: string): QueueSnapshot => reviewQueue(root));
+  ipcMain.handle(
+    IPC_CHANNELS.reviewQueue,
+    (_event, root: string, repositoryRoot?: string): QueueSnapshot => reviewQueue(root, repositoryRoot)
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.applyDecisions,
@@ -149,8 +180,8 @@ function registerHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.traceNeighbours,
-    (_event, root: string, requirementId?: string, symbolId?: string): TraceNeighbours => {
-      const queries = linkQueries({ root });
+    (_event, root: string, requirementId?: string, symbolId?: string, repositoryRoot?: string): TraceNeighbours => {
+      const queries = linkQueries({ root, ...(repositoryRoot ? { repositoryRoot } : {}) });
       return {
         symbols: requirementId ? queries.symbolsFor(requirementId) : [],
         requirements: symbolId ? queries.requirementsFor(symbolId) : [],

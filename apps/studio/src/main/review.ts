@@ -80,8 +80,11 @@ function readDecisionLog(path: string): DecisionLog {
  * Stale proposals are flagged, never removed (REQ-CORE-011 AC2): one that
  * quietly vanished would be indistinguishable from one never generated.
  */
-export function reviewQueue(root: string): QueueSnapshot {
+export function reviewQueue(root: string, repositoryRoot?: string): QueueSnapshot {
   const resolvedRoot = resolve(root);
+  // Exclusions and the commit stamp describe the code, so with a linked
+  // repository (REQ-APP-015) both point there; the artifacts stay the vault's.
+  const codeRoot = resolve(repositoryRoot ?? root);
   const paths = reviewPaths(resolvedRoot);
   const { config } = loadConfig(resolvedRoot);
 
@@ -99,14 +102,14 @@ export function reviewQueue(root: string): QueueSnapshot {
   if (existsSync(paths.symbolIndex)) {
     const symbols = parseSymbolIndex(readFileSync(paths.symbolIndex, "utf8")).symbols;
     const matcher = new ExclusionMatcher({
-      repositoryRoot: resolvedRoot,
+      repositoryRoot: codeRoot,
       additionalPatterns: config.exclude
     });
     const report = resolveProposals({
       proposals,
       knownSymbolIds: new Set(symbols.map((symbol) => symbol.symbolId)),
       isExcludedPath: (path) => matcher.isExcludedPath(path),
-      repositoryCommit: headCommit(resolvedRoot)
+      repositoryCommit: headCommit(codeRoot)
     });
     staleKeys = new Set(report.stale.map((entry) => proposalKey(entry.requirementId, entry.symbolId)));
     for (const entry of report.stale) {
@@ -161,7 +164,9 @@ export function applyDecisions(request: DecisionRequest): ReviewOutcome {
   const root = resolve(request.root);
   const paths = reviewPaths(root);
   const { config } = loadConfig(root);
-  const repositoryCommit = headCommit(root);
+  // Decisions are made about code at a commit — the linked repository's HEAD
+  // when one exists (REQ-APP-015 AC1).
+  const repositoryCommit = headCommit(resolve(request.repositoryRoot ?? request.root));
 
   const artifact = JSON.parse(readFileSync(paths.proposals, "utf8")) as { proposals?: Proposal[] };
   const byKey = new Map(
@@ -209,7 +214,10 @@ export function applyDecisions(request: DecisionRequest): ReviewOutcome {
     else bucket.push(link);
   }
 
-  const { requirements } = readVaultLinkState({ root });
+  const { requirements } = readVaultLinkState({
+    root,
+    ...(request.repositoryRoot === undefined ? {} : { repositoryRoot: request.repositoryRoot })
+  });
   const updatedDocuments: string[] = [];
   for (const requirement of requirements) {
     const filePath = resolve(root, requirement.path);

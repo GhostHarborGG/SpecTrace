@@ -45,6 +45,14 @@ body {
   white-space: nowrap;
 }
 
+/* The linked repository (REQ-APP-015): visually a sibling of the vault path,
+   with its unlink control inline so the pair reads as one unit. */
+.repo-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .spacer {
   margin-left: auto;
 }

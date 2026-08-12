@@ -20,9 +20,12 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 export function CoverageDashboard({
   root,
+  repositoryRoot,
   onOpenRequirement
 }: {
   root: string;
+  /** The linked code repository (REQ-APP-015); undefined, the vault is the repository. */
+  repositoryRoot: string | undefined;
   onOpenRequirement: (requirementId: string) => void;
 }): JSX.Element {
   const [report, setReport] = useState<CoverageReport | null>(null);
@@ -34,13 +37,13 @@ export function CoverageDashboard({
     setLoading(true);
     setError(null);
     try {
-      setReport(await window.api.coverage(root));
+      setReport(await window.api.coverage(root, undefined, repositoryRoot));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
-  }, [root]);
+  }, [root, repositoryRoot]);
 
   useEffect(() => {
     void load();

@@ -26,7 +26,14 @@ function usd(value: number): string {
   return `$${value.toFixed(4)}`;
 }
 
-export function RunPanel({ root }: { root: string }): JSX.Element {
+export function RunPanel({
+  root,
+  repositoryRoot
+}: {
+  root: string;
+  /** The linked code repository (REQ-APP-015); undefined, the vault is the repository. */
+  repositoryRoot: string | undefined;
+}): JSX.Element {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<Map<Stage, RunProgress>>(new Map());
   const [result, setResult] = useState<RunResult | null>(null);
@@ -50,13 +57,18 @@ export function RunPanel({ root }: { root: string }): JSX.Element {
     setResult(null);
     setProgress(new Map());
     try {
-      setResult(await window.api.runAnalysis({ root }));
+      setResult(
+        await window.api.runAnalysis({
+          root,
+          ...(repositoryRoot === undefined ? {} : { repositoryRoot })
+        })
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setRunning(false);
     }
-  }, [root]);
+  }, [root, repositoryRoot]);
 
   const cancel = useCallback(async () => {
     setCancelling(true);

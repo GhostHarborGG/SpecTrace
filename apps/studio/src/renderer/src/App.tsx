@@ -93,6 +93,9 @@ function DirectoryNode({
 
 export function App(): JSX.Element {
   const [vault, setVault] = useState<VaultSummary | null>(null);
+  // The linked code repository (REQ-APP-015). Null is a real state, not a
+  // loading gap: it means the vault itself is the repository (AC3).
+  const [repo, setRepo] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [buffer, setBuffer] = useState<string>("");
   const [savedContent, setSavedContent] = useState<string>("");
@@ -144,10 +147,34 @@ export function App(): JSX.Element {
       setBuffer("");
       setSavedContent("");
       setAnalysis(null);
+      // Restore this vault's repository link, if the machine remembers one (AC4).
+      setRepo(await window.api.linkedRepository(summary.root));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
+
+  const linkRepo = useCallback(async () => {
+    if (!vault) return;
+    setError(null);
+    try {
+      const chosen = await window.api.chooseRepository(vault.root);
+      if (chosen !== null) setRepo(chosen);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [vault]);
+
+  const unlinkRepo = useCallback(async () => {
+    if (!vault) return;
+    setError(null);
+    try {
+      await window.api.unlinkRepository(vault.root);
+      setRepo(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [vault]);
 
   const openFile = useCallback(
     async (path: string) => {
@@ -245,6 +272,25 @@ export function App(): JSX.Element {
             {vault.root} · {vault.fileCount} markdown file{vault.fileCount === 1 ? "" : "s"}
           </span>
         )}
+        {/* Both roots stay visible while a repository is linked (REQ-APP-015),
+            so it is never a surprise which codebase a run will index. */}
+        {vault &&
+          (repo !== null ? (
+            <span className="vault-path repo-path" title={`Linked repository: ${repo}`}>
+              ⛓ {repo}
+              <button
+                className="linkish"
+                title="Unlink repository — the vault becomes the repository again"
+                onClick={() => void unlinkRepo()}
+              >
+                unlink
+              </button>
+            </span>
+          ) : (
+            <button title="Analyze a codebase outside this vault" onClick={() => void linkRepo()}>
+              Link repository…
+            </button>
+          ))}
         {vault && (
           <nav className="views" aria-label="Surfaces">
             {VIEWS.map((option) => (
@@ -284,11 +330,15 @@ export function App(): JSX.Element {
 
       {vault && view !== "edit" && (
         <div className="surface">
-          {view === "run" && <RunPanel root={vault.root} />}
+          {view === "run" && <RunPanel root={vault.root} repositoryRoot={repo ?? undefined} />}
           {view === "coverage" && (
-            <CoverageDashboard root={vault.root} onOpenRequirement={openRequirement} />
+            <CoverageDashboard
+              root={vault.root}
+              repositoryRoot={repo ?? undefined}
+              onOpenRequirement={openRequirement}
+            />
           )}
-          {view === "review" && <ReviewQueue root={vault.root} />}
+          {view === "review" && <ReviewQueue root={vault.root} repositoryRoot={repo ?? undefined} />}
         </div>
       )}
 
@@ -375,7 +425,13 @@ export function App(): JSX.Element {
                 wiki-links below are an editor affordance and a different
                 relationship entirely. Keeping them in separate sections stops
                 a reader reading one as the other. */}
-            {vault && <TracePanes root={vault.root} requirementId={requirement?.id ?? null} />}
+            {vault && (
+              <TracePanes
+                root={vault.root}
+                repositoryRoot={repo ?? undefined}
+                requirementId={requirement?.id ?? null}
+              />
+            )}
 
             <section>
               <h2>Backlinks{backlinks.length > 0 && <span className="count">{backlinks.length}</span>}</h2>

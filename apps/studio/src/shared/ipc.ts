@@ -162,6 +162,8 @@ export interface QueueSnapshot {
 
 export interface DecisionRequest {
   root: string;
+  /** Linked code repository; its HEAD stamps the decisions (REQ-APP-015). */
+  repositoryRoot?: string;
   reviewer: string;
   decisions: Array<{
     requirementId: string;
@@ -197,6 +199,11 @@ export interface TraceNeighbours {
 
 export interface RunAnalysisRequest {
   root: string;
+  /**
+   * The linked code repository to index (REQ-APP-015). Absent, `root` is the
+   * repository too — the single-root run every pre-workspace vault gets.
+   */
+  repositoryRoot?: string;
   /** Overrides `retrieval.mode` from configuration. */
   mode?: import("@spectrace/core").RetrievalMode;
   /** Per-million-token pricing; absent, the run is reported unpriced rather than free. */
@@ -208,6 +215,16 @@ export interface Api {
   chooseVault(): Promise<VaultSummary | null>;
   /** Opens a known directory as a vault, without a picker. */
   openVault(directory: string): Promise<VaultSummary>;
+  /**
+   * Opens a folder picker and links the choice as the vault's code repository
+   * (REQ-APP-015). Persisted per machine, so reopening the vault restores it.
+   * Returns the linked POSIX path, or null if cancelled.
+   */
+  chooseRepository(vaultRoot: string): Promise<string | null>;
+  /** The repository linked to this vault, or null when there is none (or it is gone). */
+  linkedRepository(vaultRoot: string): Promise<string | null>;
+  /** Removes the vault's repository link (REQ-APP-015 AC4). */
+  unlinkRepository(vaultRoot: string): Promise<void>;
   /** Reads a vault-relative file as UTF-8 text. */
   readFile(root: string, relativePath: string): Promise<string>;
   /** Writes a vault-relative file as UTF-8 — an ordinary filesystem write (REQ-APP-001 AC2). */
@@ -219,7 +236,11 @@ export interface Api {
    * Byte-identical to `spectrace coverage --json` at the same commit — both
    * call the same core builder (NFR-APP-007).
    */
-  coverage(root: string, symbolIndexPath?: string): Promise<import("@spectrace/core").CoverageReport>;
+  coverage(
+    root: string,
+    symbolIndexPath?: string,
+    repositoryRoot?: string
+  ): Promise<import("@spectrace/core").CoverageReport>;
   /**
    * Runs the core pipeline, checkpointing each stage (REQ-APP-012).
    * Resolves with the run's outcome, including a cancelled one.
@@ -240,11 +261,16 @@ export interface Api {
    */
   onRunProgress(listener: (progress: RunProgress) => void): () => void;
   /** The review queue as core bands it (REQ-APP-013). */
-  reviewQueue(root: string): Promise<QueueSnapshot>;
+  reviewQueue(root: string, repositoryRoot?: string): Promise<QueueSnapshot>;
   /** Applies decisions through core and writes the trail, frontmatter, then index. */
   applyDecisions(request: DecisionRequest): Promise<ReviewOutcome>;
   /** Trace-link neighbours in both directions (REQ-APP-014, REQ-CORE-051). */
-  traceNeighbours(root: string, requirementId?: string, symbolId?: string): Promise<TraceNeighbours>;
+  traceNeighbours(
+    root: string,
+    requirementId?: string,
+    symbolId?: string,
+    repositoryRoot?: string
+  ): Promise<TraceNeighbours>;
   /** Git `user.name`, so the reviewer field is never guessed (REQ-CLI-005 AC2's rule). */
   defaultReviewer(root: string): Promise<string | null>;
 }
@@ -253,6 +279,9 @@ export interface Api {
 export const IPC_CHANNELS = {
   chooseVault: "spectrace:chooseVault",
   openVault: "spectrace:openVault",
+  chooseRepository: "spectrace:chooseRepository",
+  linkedRepository: "spectrace:linkedRepository",
+  unlinkRepository: "spectrace:unlinkRepository",
   readFile: "spectrace:readFile",
   writeFile: "spectrace:writeFile",
   analyzeVault: "spectrace:analyzeVault",

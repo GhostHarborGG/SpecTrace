@@ -44,8 +44,18 @@ import { headCommit } from "./coverage.js";
 import type { AnalysisStage, RunProgress, RunResult } from "../shared/ipc.js";
 
 export interface RunAnalysisOptions {
-  /** Repository root holding `.spectrace/` and the vault. */
+  /** Vault root: where the requirements, configuration, and `.spectrace/` artifacts live. */
   root: string;
+  /**
+   * The code repository to index (REQ-APP-015). Absent, `root` serves — the
+   * single-root run every pre-workspace vault gets (AC3).
+   *
+   * Strictly read from, never written to (AC2): the artifacts a run produces
+   * all land under the vault's `.spectrace/`, which is also what lets the
+   * future GitHub cache (REQ-APP-011) sit here without inventing a second
+   * write-policy.
+   */
+  repositoryRoot?: string;
   /**
    * The requirements to retrieve for, already reduced to query text.
    *
@@ -99,9 +109,12 @@ function writeArtifact(path: string, contents: string): void {
  */
 export async function runAnalysis(options: RunAnalysisOptions): Promise<RunResult> {
   const root = resolve(options.root);
+  const repositoryRoot = resolve(options.repositoryRoot ?? options.root);
   const paths = artifactPaths(root);
   const { config } = loadConfig(root);
-  const repositoryCommit = headCommit(root);
+  // Provenance is the code's commit: the index describes the repository, and
+  // stamping it with the vault's HEAD would date the wrong history.
+  const repositoryCommit = headCommit(repositoryRoot);
   const written: string[] = [];
 
   const report = (stage: AnalysisStage, completed: number, total: number, detail?: string): void => {
@@ -127,7 +140,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<RunResul
   report("index", 0, 1, "Reading source files");
 
   const indexed = indexRepository({
-    repositoryRoot: root,
+    repositoryRoot,
     repositoryCommit,
     additionalExcludePatterns: config.exclude
   });
